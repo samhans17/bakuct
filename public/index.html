@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="BakuCT - Transport Management System">
+    <meta name="theme-color" content="#0a0e14">
+    <title>BakuCT - Transport Management</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <!-- Login Screen -->
+    <div class="login-container" id="loginScreen">
+        <div class="login-box">
+            <div class="login-logo">
+                <h1>BakuCT</h1>
+                <p>Transport Management System</p>
+            </div>
+            <div class="error-message hidden" id="loginError">Invalid credentials. Please try again.</div>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" placeholder="Enter username" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" placeholder="Enter password" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn btn-primary">Sign In</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main Application -->
+    <div class="app-container hidden" id="appContainer">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1>🚛 BakuCT</h1>
+            </div>
+            <div class="header-right">
+                <div class="header-stats">
+                    <span class="stat stat-income" id="headerIncome">Income: Rs. 0</span>
+                    <span class="stat stat-expense" id="headerExpense">Expense: Rs. 0</span>
+                    <span class="stat stat-profit" id="headerProfit">Profit: Rs. 0</span>
+                </div>
+                <button class="btn btn-secondary btn-small" id="logoutBtn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                        <polyline points="16,17 21,12 16,7"></polyline>
+                        <line x1="21" y1="12" x2="9" y2="12"></line>
+                    </svg>
+                    Logout
+                </button>
+            </div>
+        </header>
+
+        <!-- Tab Navigation -->
+        <nav class="tab-nav">
+            <button class="tab-btn active" data-tab="dashboard">
+                <span class="tab-icon">📊</span>
+                Dashboard
+            </button>
+            <button class="tab-btn" data-tab="entries">
+                <span class="tab-icon">📦</span>
+                Entries
+            </button>
+            <button class="tab-btn" data-tab="expenses">
+                <span class="tab-icon">💸</span>
+                Expenses
+            </button>
+            <button class="tab-btn" data-tab="vehicles">
+                <span class="tab-icon">🚗</span>
+                Vehicles
+            </button>
+            <button class="tab-btn" data-tab="rates">
+                <span class="tab-icon">💰</span>
+                Rates
+            </button>
+        </nav>
+
+        <!-- Tab Content -->
+        <main class="tab-content">
+            <!-- Dashboard Tab -->
+            <div class="tab-panel active" id="dashboard-panel">
+                <div class="dashboard-grid">
+                    <!-- Summary Cards -->
+                    <div class="summary-cards">
+                        <div class="summary-card card-income">
+                            <div class="card-icon">📈</div>
+                            <div class="card-content">
+                                <span class="card-label">Total Income</span>
+                                <span class="card-value" id="dashTotalIncome">Rs. 0</span>
+                            </div>
+                        </div>
+                        <div class="summary-card card-expense">
+                            <div class="card-icon">📉</div>
+                            <div class="card-content">
+                                <span class="card-label">Total Expenses</span>
+                                <span class="card-value" id="dashTotalExpenses">Rs. 0</span>
+                            </div>
+                        </div>
+                        <div class="summary-card card-profit">
+                            <div class="card-icon">💵</div>
+                            <div class="card-content">
+                                <span class="card-label">Net Profit</span>
+                                <span class="card-value" id="dashNetProfit">Rs. 0</span>
+                            </div>
+                        </div>
+                        <div class="summary-card card-vehicles">
+                            <div class="card-icon">🚛</div>
+                            <div class="card-content">
+                                <span class="card-label">Active Vehicles</span>
+                                <span class="card-value" id="dashTotalVehicles">0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Monthly Stats -->
+                    <div class="monthly-stats panel">
+                        <h3 class="panel-title">📅 This Month</h3>
+                        <div class="month-cards">
+                            <div class="month-card">
+                                <span class="month-label">Income</span>
+                                <span class="month-value income" id="monthIncome">Rs. 0</span>
+                            </div>
+                            <div class="month-card">
+                                <span class="month-label">Expenses</span>
+                                <span class="month-value expense" id="monthExpenses">Rs. 0</span>
+                            </div>
+                            <div class="month-card">
+                                <span class="month-label">Profit</span>
+                                <span class="month-value profit" id="monthProfit">Rs. 0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Expenses by Type -->
+                    <div class="expenses-chart panel">
+                        <h3 class="panel-title">📊 Expenses by Type</h3>
+                        <div id="expensesByType" class="chart-container"></div>
+                    </div>
+
+                    <!-- Income by Product -->
+                    <div class="income-chart panel">
+                        <h3 class="panel-title">📦 Income by Product</h3>
+                        <div id="incomeByProduct" class="chart-container"></div>
+                    </div>
+
+                    <!-- Vehicle Summary -->
+                    <div class="vehicle-summary panel">
+                        <h3 class="panel-title">🚗 Vehicle Performance</h3>
+                        <div id="vehicleSummary" class="table-container"></div>
+                    </div>
+
+                    <!-- Recent Activity -->
+                    <div class="recent-activity panel">
+                        <h3 class="panel-title">🕐 Recent Activity</h3>
+                        <div class="activity-tabs">
+                            <button class="activity-tab active" data-activity="entries">Entries</button>
+                            <button class="activity-tab" data-activity="expenses">Expenses</button>
+                        </div>
+                        <div id="recentActivity" class="activity-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Entries Tab -->
+            <div class="tab-panel" id="entries-panel">
+                <div class="panel-layout">
+                    <div class="form-panel panel">
+                        <h3 class="panel-title">➕ Add New Entry</h3>
+                        <form id="entryForm">
+                            <div class="form-group">
+                                <label for="entryVehicle">Vehicle</label>
+                                <select id="entryVehicle">
+                                    <option value="">Select vehicle (optional)...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="entryProduct">Product</label>
+                                <select id="entryProduct" required>
+                                    <option value="">Select product...</option>
+                                </select>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="entryWeight">Weight (KG)</label>
+                                    <input type="number" id="entryWeight" placeholder="0" step="0.01" min="0" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="entryRate">Rate/Ton</label>
+                                    <input type="text" id="entryRate" readonly placeholder="Auto">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="entryAmount">Calculated Amount</label>
+                                <input type="text" id="entryAmount" readonly placeholder="Rs. 0">
+                            </div>
+                            <div class="form-group">
+                                <label for="entryNotes">Notes (Optional)</label>
+                                <input type="text" id="entryNotes" placeholder="Add notes...">
+                            </div>
+                            <button type="submit" class="btn btn-primary">+ Add Entry</button>
+                        </form>
+                    </div>
+                    <div class="list-panel panel">
+                        <h3 class="panel-title">📋 All Entries</h3>
+                        <div id="entriesList" class="data-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Expenses Tab -->
+            <div class="tab-panel" id="expenses-panel">
+                <div class="panel-layout">
+                    <div class="form-panel panel">
+                        <h3 class="panel-title">➕ Add New Expense</h3>
+                        <form id="expenseForm">
+                            <div class="form-group">
+                                <label for="expenseVehicle">Vehicle</label>
+                                <select id="expenseVehicle">
+                                    <option value="">Select vehicle (optional)...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="expenseType">Expense Type</label>
+                                <select id="expenseType" required>
+                                    <option value="fuel">Fuel</option>
+                                    <option value="maintenance">Maintenance</option>
+                                    <option value="wages">Driver Wages</option>
+                                    <option value="oil">Oil Change</option>
+                                    <option value="challan">Traffic Challan</option>
+                                    <option value="labour">Labour (Load/Unload)</option>
+                                    <option value="other">Other</option>
+                                </select>
+                            </div>
+                            <div class="form-row fuel-fields" id="fuelFields">
+                                <div class="form-group">
+                                    <label for="fuelLiters">Liters</label>
+                                    <input type="number" id="fuelLiters" placeholder="0" step="0.01" min="0">
+                                </div>
+                                <div class="form-group">
+                                    <label for="fuelRate">Rate/Liter</label>
+                                    <input type="number" id="fuelRate" placeholder="0" step="0.01" min="0">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="expenseAmount">Amount (Rs.)</label>
+                                <input type="number" id="expenseAmount" placeholder="0" step="0.01" min="0" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="expenseDescription">Description (Optional)</label>
+                                <input type="text" id="expenseDescription" placeholder="Add description...">
+                            </div>
+                            <button type="submit" class="btn btn-primary">+ Add Expense</button>
+                        </form>
+                    </div>
+                    <div class="list-panel panel">
+                        <h3 class="panel-title">📋 All Expenses</h3>
+                        <div id="expensesList" class="data-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Vehicles Tab -->
+            <div class="tab-panel" id="vehicles-panel">
+                <div class="panel-layout">
+                    <div class="form-panel panel">
+                        <h3 class="panel-title">➕ Add New Vehicle</h3>
+                        <form id="vehicleForm">
+                            <div class="form-group">
+                                <label for="carNumber">Car Number *</label>
+                                <input type="text" id="carNumber" placeholder="e.g., ABC-1234" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="driverName">Driver Name</label>
+                                <input type="text" id="driverName" placeholder="Enter driver name...">
+                            </div>
+                            <div class="form-group">
+                                <label for="vehicleType">Vehicle Type</label>
+                                <select id="vehicleType">
+                                    <option value="">Select type...</option>
+                                    <option value="truck">Truck</option>
+                                    <option value="trailer">Trailer</option>
+                                    <option value="pickup">Pickup</option>
+                                    <option value="dumper">Dumper</option>
+                                    <option value="tanker">Tanker</option>
+                                    <option value="other">Other</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-primary">+ Add Vehicle</button>
+                        </form>
+                    </div>
+                    <div class="list-panel panel">
+                        <h3 class="panel-title">🚗 All Vehicles</h3>
+                        <div id="vehiclesList" class="data-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Rates Tab -->
+            <div class="tab-panel" id="rates-panel">
+                <div class="panel-layout">
+                    <div class="form-panel panel">
+                        <h3 class="panel-title">➕ Add Product Rate</h3>
+                        <form id="rateForm">
+                            <div class="form-group">
+                                <label for="productName">Product Name *</label>
+                                <input type="text" id="productName" placeholder="e.g., Wheat, Rice..." required>
+                            </div>
+                            <div class="form-group">
+                                <label for="productRate">Rate per Ton (Rs.) *</label>
+                                <input type="number" id="productRate" placeholder="0" step="0.01" min="0" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary">+ Add Rate</button>
+                        </form>
+                    </div>
+                    <div class="list-panel panel">
+                        <h3 class="panel-title">💰 All Rates</h3>
+                        <div id="ratesList" class="data-list"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/app.js"></script>
+</body>
+</html>
+

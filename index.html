@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="BakuCT - Transport Management System for tracking product entries, expenses, and rates">
+    <meta name="theme-color" content="#0a0e14">
+    <title>BakuCT - Transport Management</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <!-- Login Screen -->
+    <div class="login-container" id="loginScreen">
+        <div class="login-box">
+            <div class="login-logo">
+                <h1>BakuCT</h1>
+                <p>Transport Management System</p>
+            </div>
+            <div class="error-message hidden" id="loginError">Invalid credentials. Please try again.</div>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" placeholder="Enter username" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" placeholder="Enter password" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn btn-primary">Sign In</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main Application -->
+    <div class="app-container" id="appContainer">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1>BakuCT</h1>
+                <div class="summary-badges">
+                    <span class="badge badge-income" id="totalIncome">Income: Rs. 0</span>
+                    <span class="badge badge-expense" id="totalExpense">Expense: Rs. 0</span>
+                    <span class="badge badge-profit" id="netProfit">Profit: Rs. 0</span>
+                </div>
+            </div>
+            <button class="btn btn-secondary btn-small" id="logoutBtn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                    <polyline points="16,17 21,12 16,7"></polyline>
+                    <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+                Logout
+            </button>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Entries Column -->
+            <div class="column">
+                <div class="column-header">
+                    <h2>
+                        <span class="icon">📦</span>
+                        Product Entries
+                    </h2>
+                </div>
+                <div class="column-body">
+                    <div class="add-form">
+                        <h3>Add New Entry</h3>
+                        <div class="form-group">
+                            <label for="entryProduct">Product</label>
+                            <select id="entryProduct">
+                                <option value="">Select product...</option>
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="entryWeight">Weight (KG)</label>
+                                <input type="number" id="entryWeight" placeholder="0" step="0.01" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="entryRate">Rate/Ton</label>
+                                <input type="text" id="entryRate" readonly placeholder="Auto">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="entryAmount">Calculated Amount</label>
+                            <input type="text" id="entryAmount" readonly placeholder="Rs. 0">
+                        </div>
+                        <button class="btn btn-primary" id="addEntryBtn">+ Add Entry</button>
+                    </div>
+                    <div id="entriesList">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📦</div>
+                            <p>No entries yet. Add your first entry above.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Expenses Column -->
+            <div class="column">
+                <div class="column-header">
+                    <h2>
+                        <span class="icon">💸</span>
+                        Expenses
+                    </h2>
+                </div>
+                <div class="column-body">
+                    <div class="add-form">
+                        <h3>Add New Expense</h3>
+                        <div class="form-group">
+                            <label for="expenseType">Expense Type</label>
+                            <select id="expenseType">
+                                <option value="fuel">Fuel</option>
+                                <option value="maintenance">Maintenance</option>
+                                <option value="wages">Driver Wages</option>
+                                <option value="oil">Oil Change</option>
+                                <option value="challan">Traffic Challan</option>
+                                <option value="labour">Labour (Load/Unload)</option>
+                            </select>
+                        </div>
+                        <div class="form-row" id="fuelFields">
+                            <div class="form-group">
+                                <label for="fuelLiters">Liters</label>
+                                <input type="number" id="fuelLiters" placeholder="0" step="0.01" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="fuelRate">Rate/Liter</label>
+                                <input type="number" id="fuelRate" placeholder="0" step="0.01" min="0">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="expenseAmount">Amount (Rs.)</label>
+                            <input type="number" id="expenseAmount" placeholder="0" step="0.01" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label for="expenseDescription">Description (Optional)</label>
+                            <input type="text" id="expenseDescription" placeholder="Add notes...">
+                        </div>
+                        <button class="btn btn-primary" id="addExpenseBtn">+ Add Expense</button>
+                    </div>
+                    <div id="expensesList">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">💸</div>
+                            <p>No expenses yet. Add your first expense above.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Rates Column -->
+            <div class="column">
+                <div class="column-header">
+                    <h2>
+                        <span class="icon">📊</span>
+                        Product Rates
+                    </h2>
+                </div>
+                <div class="column-body">
+                    <div class="add-form">
+                        <h3>Add Product Rate</h3>
+                        <div class="form-group">
+                            <label for="productName">Product Name</label>
+                            <input type="text" id="productName" placeholder="e.g., Wheat, Rice...">
+                        </div>
+                        <div class="form-group">
+                            <label for="productRate">Rate per Ton (Rs.)</label>
+                            <input type="number" id="productRate" placeholder="0" step="0.01" min="0">
+                        </div>
+                        <button class="btn btn-primary" id="addRateBtn">+ Add Rate</button>
+                    </div>
+                    <div id="ratesList">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📊</div>
+                            <p>No rates defined. Add product rates above.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/app.js"></script>
+</body>
+</html>
