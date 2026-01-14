@@ -39,22 +39,27 @@ db.exec(`
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
-    -- Product rates table
+    -- Product rates table (updated with rate_per_minute)
     CREATE TABLE IF NOT EXISTS rates (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         product_name TEXT UNIQUE NOT NULL,
-        rate_per_ton REAL NOT NULL,
+        rate_per_ton REAL,
+        rate_per_minute REAL,
+        rate_type TEXT DEFAULT 'per_ton',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
-    -- Entries table (product loads)
+    -- Entries table (updated with entry_type and minutes)
     CREATE TABLE IF NOT EXISTS entries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         vehicle_id INTEGER,
         product_name TEXT NOT NULL,
-        weight_kg REAL NOT NULL,
-        rate_per_ton REAL NOT NULL,
+        entry_type TEXT DEFAULT 'per_ton',
+        weight_kg REAL,
+        minutes REAL,
+        rate_per_ton REAL,
+        rate_per_minute REAL,
         amount REAL NOT NULL,
         notes TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -77,6 +82,23 @@ db.exec(`
     -- Insert default admin user if not exists
     INSERT OR IGNORE INTO users (username, password) VALUES ('admin', 'bakuct2024');
 `);
+
+// Add new columns if they don't exist (migration)
+try {
+    db.exec(`ALTER TABLE rates ADD COLUMN rate_per_minute REAL`);
+} catch (e) { /* column exists */ }
+try {
+    db.exec(`ALTER TABLE rates ADD COLUMN rate_type TEXT DEFAULT 'per_ton'`);
+} catch (e) { /* column exists */ }
+try {
+    db.exec(`ALTER TABLE entries ADD COLUMN entry_type TEXT DEFAULT 'per_ton'`);
+} catch (e) { /* column exists */ }
+try {
+    db.exec(`ALTER TABLE entries ADD COLUMN minutes REAL`);
+} catch (e) { /* column exists */ }
+try {
+    db.exec(`ALTER TABLE entries ADD COLUMN rate_per_minute REAL`);
+} catch (e) { /* column exists */ }
 
 // ============ AUTH ROUTES ============
 app.post('/api/login', (req, res) => {
@@ -152,23 +174,31 @@ app.get('/api/rates', (req, res) => {
 });
 
 app.post('/api/rates', (req, res) => {
-    const { product_name, rate_per_ton } = req.body;
+    const { product_name, rate_per_ton, rate_per_minute, rate_type } = req.body;
     
-    if (!product_name || !rate_per_ton) {
-        return res.status(400).json({ error: 'Product name and rate are required' });
+    if (!product_name) {
+        return res.status(400).json({ error: 'Product name is required' });
+    }
+    
+    if (rate_type === 'per_ton' && !rate_per_ton) {
+        return res.status(400).json({ error: 'Rate per ton is required' });
+    }
+    
+    if (rate_type === 'per_minute' && !rate_per_minute) {
+        return res.status(400).json({ error: 'Rate per minute is required' });
     }
     
     try {
-        // Upsert - update if exists, insert if not
         const existing = db.prepare('SELECT * FROM rates WHERE product_name = ?').get(product_name);
         
         if (existing) {
-            db.prepare('UPDATE rates SET rate_per_ton = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(rate_per_ton, existing.id);
+            db.prepare('UPDATE rates SET rate_per_ton = ?, rate_per_minute = ?, rate_type = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+                .run(rate_per_ton || null, rate_per_minute || null, rate_type || 'per_ton', existing.id);
             const rate = db.prepare('SELECT * FROM rates WHERE id = ?').get(existing.id);
             res.json(rate);
         } else {
-            const stmt = db.prepare('INSERT INTO rates (product_name, rate_per_ton) VALUES (?, ?)');
-            const result = stmt.run(product_name, rate_per_ton);
+            const stmt = db.prepare('INSERT INTO rates (product_name, rate_per_ton, rate_per_minute, rate_type) VALUES (?, ?, ?, ?)');
+            const result = stmt.run(product_name, rate_per_ton || null, rate_per_minute || null, rate_type || 'per_ton');
             const rate = db.prepare('SELECT * FROM rates WHERE id = ?').get(result.lastInsertRowid);
             res.json(rate);
         }
@@ -200,17 +230,42 @@ app.get('/api/entries', (req, res) => {
 });
 
 app.post('/api/entries', (req, res) => {
-    const { vehicle_id, product_name, weight_kg, rate_per_ton, notes } = req.body;
+    const { vehicle_id, product_name, entry_type, weight_kg, minutes, rate_per_ton, rate_per_minute, notes } = req.body;
     
-    if (!product_name || !weight_kg || !rate_per_ton) {
-        return res.status(400).json({ error: 'Product name, weight, and rate are required' });
+    if (!product_name) {
+        return res.status(400).json({ error: 'Product name is required' });
     }
     
-    const amount = (weight_kg / 1000) * rate_per_ton;
+    let amount = 0;
+    
+    if (entry_type === 'per_minute') {
+        if (!minutes || !rate_per_minute) {
+            return res.status(400).json({ error: 'Minutes and rate per minute are required' });
+        }
+        amount = minutes * rate_per_minute;
+    } else {
+        if (!weight_kg || !rate_per_ton) {
+            return res.status(400).json({ error: 'Weight and rate per ton are required' });
+        }
+        amount = (weight_kg / 1000) * rate_per_ton;
+    }
     
     try {
-        const stmt = db.prepare('INSERT INTO entries (vehicle_id, product_name, weight_kg, rate_per_ton, amount, notes) VALUES (?, ?, ?, ?, ?, ?)');
-        const result = stmt.run(vehicle_id || null, product_name, weight_kg, rate_per_ton, amount, notes || null);
+        const stmt = db.prepare(`
+            INSERT INTO entries (vehicle_id, product_name, entry_type, weight_kg, minutes, rate_per_ton, rate_per_minute, amount, notes) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        const result = stmt.run(
+            vehicle_id || null, 
+            product_name, 
+            entry_type || 'per_ton',
+            weight_kg || null, 
+            minutes || null,
+            rate_per_ton || null, 
+            rate_per_minute || null,
+            amount, 
+            notes || null
+        );
         
         const entry = db.prepare(`
             SELECT e.*, v.car_number 
@@ -282,96 +337,118 @@ app.delete('/api/expenses/:id', (req, res) => {
 
 // ============ DASHBOARD ROUTES ============
 app.get('/api/dashboard', (req, res) => {
+    const { startDate, endDate } = req.query;
+    
+    // Build date filters for different tables
+    let entriesDateFilter = '';
+    let expensesDateFilter = '';
+    let entriesParams = [];
+    let expensesParams = [];
+    
+    if (startDate && endDate) {
+        entriesDateFilter = "AND date(e.created_at) BETWEEN date(?) AND date(?)";
+        expensesDateFilter = "AND date(exp.created_at) BETWEEN date(?) AND date(?)";
+        entriesParams = [startDate, endDate];
+        expensesParams = [startDate, endDate];
+    } else {
+        // Default to current month
+        entriesDateFilter = "AND strftime('%Y-%m', e.created_at) = strftime('%Y-%m', 'now')";
+        expensesDateFilter = "AND strftime('%Y-%m', exp.created_at) = strftime('%Y-%m', 'now')";
+    }
+    
     try {
-        // Total income
-        const totalIncome = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM entries').get().total;
+        // Filtered income
+        const filteredIncome = db.prepare(`
+            SELECT COALESCE(SUM(e.amount), 0) as total FROM entries e WHERE 1=1 ${entriesDateFilter}
+        `).get(...entriesParams).total;
         
-        // Total expenses
-        const totalExpenses = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM expenses').get().total;
+        // Filtered expenses
+        const filteredExpenses = db.prepare(`
+            SELECT COALESCE(SUM(exp.amount), 0) as total FROM expenses exp WHERE 1=1 ${expensesDateFilter}
+        `).get(...expensesParams).total;
         
-        // Total vehicles
-        const totalVehicles = db.prepare("SELECT COUNT(*) as count FROM vehicles WHERE status = 'active'").get().count;
+        // Total vehicles (active)
+        const totalVehicles = db.prepare("SELECT COUNT(*) as count FROM vehicles WHERE status = 'active' OR status IS NULL").get().count;
         
-        // Total entries
-        const totalEntries = db.prepare('SELECT COUNT(*) as count FROM entries').get().count;
+        // Filtered entries count
+        const filteredEntriesCount = db.prepare(`
+            SELECT COUNT(*) as count FROM entries e WHERE 1=1 ${entriesDateFilter}
+        `).get(...entriesParams).count;
         
-        // Expenses by type
+        // Expenses by type (filtered)
         const expensesByType = db.prepare(`
-            SELECT expense_type, SUM(amount) as total 
-            FROM expenses 
-            GROUP BY expense_type 
+            SELECT exp.expense_type, SUM(exp.amount) as total 
+            FROM expenses exp
+            WHERE 1=1 ${expensesDateFilter}
+            GROUP BY exp.expense_type 
             ORDER BY total DESC
-        `).all();
+        `).all(...expensesParams);
         
-        // Recent entries (last 5)
+        // Recent entries (last 5, filtered)
         const recentEntries = db.prepare(`
             SELECT e.*, v.car_number 
             FROM entries e 
             LEFT JOIN vehicles v ON e.vehicle_id = v.id 
+            WHERE 1=1 ${entriesDateFilter}
             ORDER BY e.created_at DESC 
             LIMIT 5
-        `).all();
+        `).all(...entriesParams);
         
-        // Recent expenses (last 5)
+        // Recent expenses (last 5, filtered)
         const recentExpenses = db.prepare(`
-            SELECT e.*, v.car_number 
-            FROM expenses e 
-            LEFT JOIN vehicles v ON e.vehicle_id = v.id 
-            ORDER BY e.created_at DESC 
+            SELECT exp.*, v.car_number 
+            FROM expenses exp
+            LEFT JOIN vehicles v ON exp.vehicle_id = v.id 
+            WHERE 1=1 ${expensesDateFilter}
+            ORDER BY exp.created_at DESC 
             LIMIT 5
-        `).all();
+        `).all(...expensesParams);
         
-        // Income by product
+        // Income by product (filtered)
         const incomeByProduct = db.prepare(`
-            SELECT product_name, SUM(amount) as total, SUM(weight_kg) as total_weight
-            FROM entries 
-            GROUP BY product_name 
+            SELECT e.product_name, e.entry_type, SUM(e.amount) as total, SUM(e.weight_kg) as total_weight, SUM(e.minutes) as total_minutes
+            FROM entries e
+            WHERE 1=1 ${entriesDateFilter}
+            GROUP BY e.product_name 
             ORDER BY total DESC
-        `).all();
+        `).all(...entriesParams);
         
-        // Vehicle-wise summary
+        // Vehicle-wise summary (no date filter for simplicity)
         const vehicleSummary = db.prepare(`
             SELECT 
                 v.id,
                 v.car_number,
                 v.driver_name,
-                COALESCE(SUM(e.amount), 0) as total_income,
+                COALESCE((SELECT SUM(amount) FROM entries WHERE vehicle_id = v.id), 0) as total_income,
                 COALESCE((SELECT SUM(amount) FROM expenses WHERE vehicle_id = v.id), 0) as total_expense
             FROM vehicles v
-            LEFT JOIN entries e ON v.id = e.vehicle_id
-            GROUP BY v.id
             ORDER BY total_income DESC
         `).all();
         
-        // Monthly summary (current month)
-        const currentMonthIncome = db.prepare(`
-            SELECT COALESCE(SUM(amount), 0) as total 
-            FROM entries 
-            WHERE strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')
-        `).get().total;
-        
-        const currentMonthExpenses = db.prepare(`
-            SELECT COALESCE(SUM(amount), 0) as total 
-            FROM expenses 
-            WHERE strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')
-        `).get().total;
+        // All-time totals for comparison
+        const allTimeIncome = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM entries').get().total;
+        const allTimeExpenses = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM expenses').get().total;
         
         res.json({
             summary: {
-                totalIncome,
-                totalExpenses,
-                netProfit: totalIncome - totalExpenses,
+                filteredIncome,
+                filteredExpenses,
+                filteredProfit: filteredIncome - filteredExpenses,
                 totalVehicles,
-                totalEntries,
-                currentMonthIncome,
-                currentMonthExpenses,
-                currentMonthProfit: currentMonthIncome - currentMonthExpenses
+                filteredEntriesCount,
+                allTimeIncome,
+                allTimeExpenses,
+                allTimeProfit: allTimeIncome - allTimeExpenses
             },
             expensesByType,
             incomeByProduct,
             vehicleSummary,
             recentEntries,
-            recentExpenses
+            recentExpenses,
+            dateRange: {
+                startDate: startDate || 'current_month_start',
+                endDate: endDate || 'current_month_end'
+            }
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -400,4 +477,3 @@ process.on('SIGINT', () => {
     db.close();
     process.exit();
 });
-

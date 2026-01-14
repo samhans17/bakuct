@@ -13,7 +13,13 @@ let state = {
     entries: [],
     expenses: [],
     dashboard: null,
-    currentActivityTab: 'entries'
+    currentActivityTab: 'entries',
+    dateFilter: {
+        preset: 'current_month',
+        startDate: null,
+        endDate: null
+    },
+    theme: 'dark'
 };
 
 // ===== DOM Elements =====
@@ -21,10 +27,17 @@ const DOM = {};
 
 // ===== Initialization =====
 document.addEventListener('DOMContentLoaded', () => {
+    initializeTheme();
     initializeDOM();
     initializeEventListeners();
     checkAuth();
 });
+
+function initializeTheme() {
+    const savedTheme = localStorage.getItem('bakuctTheme') || 'dark';
+    state.theme = savedTheme;
+    document.documentElement.setAttribute('data-theme', savedTheme);
+}
 
 function initializeDOM() {
     // Login elements
@@ -37,6 +50,7 @@ function initializeDOM() {
     // App elements
     DOM.appContainer = document.getElementById('appContainer');
     DOM.logoutBtn = document.getElementById('logoutBtn');
+    DOM.themeToggle = document.getElementById('themeToggle');
 
     // Header stats
     DOM.headerIncome = document.getElementById('headerIncome');
@@ -47,6 +61,14 @@ function initializeDOM() {
     DOM.tabBtns = document.querySelectorAll('.tab-btn');
     DOM.tabPanels = document.querySelectorAll('.tab-panel');
 
+    // Date filter elements
+    DOM.dateRangePreset = document.getElementById('dateRangePreset');
+    DOM.customDatesGroup = document.getElementById('customDatesGroup');
+    DOM.startDate = document.getElementById('startDate');
+    DOM.endDate = document.getElementById('endDate');
+    DOM.applyDateFilter = document.getElementById('applyDateFilter');
+    DOM.dateRangeDisplay = document.getElementById('dateRangeDisplay');
+
     // Forms
     DOM.entryForm = document.getElementById('entryForm');
     DOM.expenseForm = document.getElementById('expenseForm');
@@ -56,8 +78,13 @@ function initializeDOM() {
     // Entry form fields
     DOM.entryVehicle = document.getElementById('entryVehicle');
     DOM.entryProduct = document.getElementById('entryProduct');
+    DOM.entryType = document.getElementById('entryType');
+    DOM.perTonFields = document.getElementById('perTonFields');
+    DOM.perMinuteFields = document.getElementById('perMinuteFields');
     DOM.entryWeight = document.getElementById('entryWeight');
-    DOM.entryRate = document.getElementById('entryRate');
+    DOM.entryRateTon = document.getElementById('entryRateTon');
+    DOM.entryMinutes = document.getElementById('entryMinutes');
+    DOM.entryRateMinute = document.getElementById('entryRateMinute');
     DOM.entryAmount = document.getElementById('entryAmount');
     DOM.entryNotes = document.getElementById('entryNotes');
 
@@ -77,7 +104,11 @@ function initializeDOM() {
 
     // Rate form fields
     DOM.productName = document.getElementById('productName');
-    DOM.productRate = document.getElementById('productRate');
+    DOM.rateType = document.getElementById('rateType');
+    DOM.perTonRateField = document.getElementById('perTonRateField');
+    DOM.perMinuteRateField = document.getElementById('perMinuteRateField');
+    DOM.productRateTon = document.getElementById('productRateTon');
+    DOM.productRateMinute = document.getElementById('productRateMinute');
 
     // Lists
     DOM.entriesList = document.getElementById('entriesList');
@@ -90,9 +121,9 @@ function initializeDOM() {
     DOM.dashTotalExpenses = document.getElementById('dashTotalExpenses');
     DOM.dashNetProfit = document.getElementById('dashNetProfit');
     DOM.dashTotalVehicles = document.getElementById('dashTotalVehicles');
-    DOM.monthIncome = document.getElementById('monthIncome');
-    DOM.monthExpenses = document.getElementById('monthExpenses');
-    DOM.monthProfit = document.getElementById('monthProfit');
+    DOM.allTimeIncome = document.getElementById('allTimeIncome');
+    DOM.allTimeExpenses = document.getElementById('allTimeExpenses');
+    DOM.allTimeProfit = document.getElementById('allTimeProfit');
     DOM.expensesByType = document.getElementById('expensesByType');
     DOM.incomeByProduct = document.getElementById('incomeByProduct');
     DOM.vehicleSummary = document.getElementById('vehicleSummary');
@@ -109,10 +140,17 @@ function initializeEventListeners() {
     // Logout
     DOM.logoutBtn.addEventListener('click', logout);
 
+    // Theme toggle
+    DOM.themeToggle.addEventListener('click', toggleTheme);
+
     // Tab navigation
     DOM.tabBtns.forEach(btn => {
         btn.addEventListener('click', () => switchTab(btn.dataset.tab));
     });
+
+    // Date filter
+    DOM.dateRangePreset.addEventListener('change', handleDatePresetChange);
+    DOM.applyDateFilter.addEventListener('click', applyCustomDateFilter);
 
     // Forms
     DOM.entryForm.addEventListener('submit', handleAddEntry);
@@ -120,9 +158,14 @@ function initializeEventListeners() {
     DOM.vehicleForm.addEventListener('submit', handleAddVehicle);
     DOM.rateForm.addEventListener('submit', handleAddRate);
 
-    // Entry form - product selection
+    // Entry form - type and product selection
+    DOM.entryType.addEventListener('change', handleEntryTypeChange);
     DOM.entryProduct.addEventListener('change', handleProductChange);
     DOM.entryWeight.addEventListener('input', calculateEntryAmount);
+    DOM.entryMinutes.addEventListener('input', calculateEntryAmount);
+
+    // Rate form - type selection
+    DOM.rateType.addEventListener('change', handleRateTypeChange);
 
     // Expense form - type selection
     DOM.expenseType.addEventListener('change', handleExpenseTypeChange);
@@ -138,6 +181,13 @@ function initializeEventListeners() {
             renderRecentActivity();
         });
     });
+}
+
+// ===== Theme Toggle =====
+function toggleTheme() {
+    state.theme = state.theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', state.theme);
+    localStorage.setItem('bakuctTheme', state.theme);
 }
 
 // ===== API Functions =====
@@ -208,25 +258,108 @@ async function showApp() {
 // ===== Data Loading =====
 async function loadAllData() {
     try {
-        const [vehicles, rates, entries, expenses, dashboard] = await Promise.all([
+        const [vehicles, rates, entries, expenses] = await Promise.all([
             api('/vehicles'),
             api('/rates'),
             api('/entries'),
-            api('/expenses'),
-            api('/dashboard')
+            api('/expenses')
         ]);
 
         state.vehicles = vehicles;
         state.rates = rates;
         state.entries = entries;
         state.expenses = expenses;
-        state.dashboard = dashboard;
 
         renderAll();
+        await loadDashboard();
     } catch (error) {
         console.error('Failed to load data:', error);
         alert('Failed to load data. Please refresh the page.');
     }
+}
+
+// ===== Date Filter =====
+function handleDatePresetChange() {
+    const preset = DOM.dateRangePreset.value;
+    state.dateFilter.preset = preset;
+
+    if (preset === 'custom') {
+        DOM.customDatesGroup.classList.remove('hidden');
+    } else {
+        DOM.customDatesGroup.classList.add('hidden');
+        loadDashboard();
+    }
+}
+
+function applyCustomDateFilter() {
+    state.dateFilter.startDate = DOM.startDate.value;
+    state.dateFilter.endDate = DOM.endDate.value;
+    
+    if (state.dateFilter.startDate && state.dateFilter.endDate) {
+        loadDashboard();
+    } else {
+        alert('Please select both start and end dates');
+    }
+}
+
+function getDateRange() {
+    const preset = state.dateFilter.preset;
+    const today = new Date();
+    let startDate, endDate;
+
+    switch (preset) {
+        case 'current_month':
+            startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+            endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+            break;
+        case 'last_month':
+            startDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+            endDate = new Date(today.getFullYear(), today.getMonth(), 0);
+            break;
+        case 'last_7_days':
+            startDate = new Date(today);
+            startDate.setDate(today.getDate() - 7);
+            endDate = today;
+            break;
+        case 'last_30_days':
+            startDate = new Date(today);
+            startDate.setDate(today.getDate() - 30);
+            endDate = today;
+            break;
+        case 'this_year':
+            startDate = new Date(today.getFullYear(), 0, 1);
+            endDate = new Date(today.getFullYear(), 11, 31);
+            break;
+        case 'all_time':
+            return { startDate: null, endDate: null };
+        case 'custom':
+            return {
+                startDate: state.dateFilter.startDate,
+                endDate: state.dateFilter.endDate
+            };
+        default:
+            startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+            endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    }
+
+    return {
+        startDate: startDate.toISOString().split('T')[0],
+        endDate: endDate.toISOString().split('T')[0]
+    };
+}
+
+function getDateRangeLabel() {
+    const preset = state.dateFilter.preset;
+    const labels = {
+        'current_month': 'Current Month',
+        'last_month': 'Last Month',
+        'last_7_days': 'Last 7 Days',
+        'last_30_days': 'Last 30 Days',
+        'this_year': 'This Year',
+        'all_time': 'All Time',
+        'custom': 'Custom Range'
+    };
+    return labels[preset] || 'Current Month';
 }
 
 // ===== Tab Navigation =====
@@ -239,7 +372,6 @@ function switchTab(tabId) {
         panel.classList.toggle('active', panel.id === `${tabId}-panel`);
     });
 
-    // Refresh dashboard when switching to it
     if (tabId === 'dashboard') {
         loadDashboard();
     }
@@ -292,7 +424,304 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// ===== Vehicles =====
+// ===== Rates Functions =====
+function handleRateTypeChange() {
+    const rateType = DOM.rateType.value;
+    
+    if (rateType === 'per_minute') {
+        DOM.perTonRateField.classList.add('hidden');
+        DOM.perMinuteRateField.classList.remove('hidden');
+    } else {
+        DOM.perTonRateField.classList.remove('hidden');
+        DOM.perMinuteRateField.classList.add('hidden');
+    }
+}
+
+async function handleAddRate(e) {
+    e.preventDefault();
+
+    const rateType = DOM.rateType.value;
+    const rateData = {
+        product_name: DOM.productName.value.trim(),
+        rate_type: rateType,
+        rate_per_ton: rateType === 'per_ton' ? parseFloat(DOM.productRateTon.value) : null,
+        rate_per_minute: rateType === 'per_minute' ? parseFloat(DOM.productRateMinute.value) : null
+    };
+
+    try {
+        const rate = await api('/rates', {
+            method: 'POST',
+            body: JSON.stringify(rateData)
+        });
+
+        const existingIndex = state.rates.findIndex(r => r.id === rate.id);
+        if (existingIndex >= 0) {
+            state.rates[existingIndex] = rate;
+        } else {
+            state.rates.push(rate);
+        }
+
+        renderRates();
+        updateProductDropdown();
+        DOM.rateForm.reset();
+        handleRateTypeChange();
+    } catch (error) {
+        alert(error.message || 'Failed to add rate');
+    }
+}
+
+async function deleteRate(id) {
+    if (!confirm('Are you sure you want to delete this rate?')) return;
+
+    try {
+        await api(`/rates/${id}`, { method: 'DELETE' });
+        state.rates = state.rates.filter(r => r.id !== id);
+        renderRates();
+        updateProductDropdown();
+    } catch (error) {
+        alert(error.message || 'Failed to delete rate');
+    }
+}
+
+function renderRates() {
+    if (state.rates.length === 0) {
+        DOM.ratesList.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">💰</div>
+                <p>No rates defined. Add product rates above.</p>
+            </div>
+        `;
+        return;
+    }
+
+    DOM.ratesList.innerHTML = state.rates.map(rate => {
+        const isPerMinute = rate.rate_type === 'per_minute';
+        const rateValue = isPerMinute ? rate.rate_per_minute : rate.rate_per_ton;
+        const rateUnit = isPerMinute ? 'per Minute' : 'per Ton';
+
+        return `
+            <div class="rate-card">
+                <div class="rate-card-header">
+                    <span class="rate-card-name">${escapeHtml(rate.product_name)}</span>
+                    <span class="rate-card-type ${isPerMinute ? 'per-minute' : 'per-ton'}">${isPerMinute ? '⏱️ Time' : '⚖️ Weight'}</span>
+                    <button class="delete-btn" onclick="deleteRate(${rate.id})" title="Delete">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="rate-card-value">${formatCurrency(rateValue)}</div>
+                <div class="rate-card-unit">${rateUnit}</div>
+            </div>
+        `;
+    }).join('');
+}
+
+function updateProductDropdown() {
+    DOM.entryProduct.innerHTML = '<option value="">Select product...</option>' +
+        state.rates.map(r => {
+            const isPerMinute = r.rate_type === 'per_minute';
+            const rateValue = isPerMinute ? r.rate_per_minute : r.rate_per_ton;
+            const rateUnit = isPerMinute ? '/min' : '/ton';
+            return `<option value="${r.product_name}" 
+                data-rate-ton="${r.rate_per_ton || ''}" 
+                data-rate-minute="${r.rate_per_minute || ''}"
+                data-rate-type="${r.rate_type || 'per_ton'}">
+                ${escapeHtml(r.product_name)} (${formatCurrency(rateValue)}${rateUnit})
+            </option>`;
+        }).join('');
+}
+
+// ===== Entries Functions =====
+function handleEntryTypeChange() {
+    const entryType = DOM.entryType.value;
+    
+    if (entryType === 'per_minute') {
+        DOM.perTonFields.classList.add('hidden');
+        DOM.perMinuteFields.classList.remove('hidden');
+    } else {
+        DOM.perTonFields.classList.remove('hidden');
+        DOM.perMinuteFields.classList.add('hidden');
+    }
+    
+    calculateEntryAmount();
+}
+
+function handleProductChange() {
+    const selected = DOM.entryProduct.selectedOptions[0];
+    if (selected && selected.value) {
+        const rateType = selected.dataset.rateType || 'per_ton';
+        const rateTon = selected.dataset.rateTon;
+        const rateMinute = selected.dataset.rateMinute;
+
+        // Set entry type based on product rate type
+        DOM.entryType.value = rateType;
+        handleEntryTypeChange();
+
+        if (rateTon) {
+            DOM.entryRateTon.value = formatCurrency(rateTon);
+        }
+        if (rateMinute) {
+            DOM.entryRateMinute.value = formatCurrency(rateMinute);
+        }
+
+        calculateEntryAmount();
+    } else {
+        DOM.entryRateTon.value = '';
+        DOM.entryRateMinute.value = '';
+        DOM.entryAmount.value = '';
+    }
+}
+
+function calculateEntryAmount() {
+    const selected = DOM.entryProduct.selectedOptions[0];
+    const entryType = DOM.entryType.value;
+
+    if (!selected || !selected.value) {
+        DOM.entryAmount.value = '';
+        return;
+    }
+
+    if (entryType === 'per_minute') {
+        const minutes = parseFloat(DOM.entryMinutes.value) || 0;
+        const rateMinute = parseFloat(selected.dataset.rateMinute) || 0;
+        
+        if (minutes > 0 && rateMinute > 0) {
+            DOM.entryAmount.value = formatCurrency(minutes * rateMinute);
+        } else {
+            DOM.entryAmount.value = '';
+        }
+    } else {
+        const weight = parseFloat(DOM.entryWeight.value) || 0;
+        const rateTon = parseFloat(selected.dataset.rateTon) || 0;
+
+        if (weight > 0 && rateTon > 0) {
+            const tons = weight / 1000;
+            DOM.entryAmount.value = formatCurrency(tons * rateTon);
+        } else {
+            DOM.entryAmount.value = '';
+        }
+    }
+}
+
+async function handleAddEntry(e) {
+    e.preventDefault();
+
+    const selected = DOM.entryProduct.selectedOptions[0];
+    if (!selected || !selected.value) {
+        alert('Please select a product');
+        return;
+    }
+
+    const entryType = DOM.entryType.value;
+    const entryData = {
+        vehicle_id: DOM.entryVehicle.value || null,
+        product_name: DOM.entryProduct.value,
+        entry_type: entryType,
+        notes: DOM.entryNotes.value.trim()
+    };
+
+    if (entryType === 'per_minute') {
+        entryData.minutes = parseFloat(DOM.entryMinutes.value);
+        entryData.rate_per_minute = parseFloat(selected.dataset.rateMinute);
+        
+        if (!entryData.minutes || !entryData.rate_per_minute) {
+            alert('Please enter minutes');
+            return;
+        }
+    } else {
+        entryData.weight_kg = parseFloat(DOM.entryWeight.value);
+        entryData.rate_per_ton = parseFloat(selected.dataset.rateTon);
+        
+        if (!entryData.weight_kg || !entryData.rate_per_ton) {
+            alert('Please enter weight');
+            return;
+        }
+    }
+
+    try {
+        const entry = await api('/entries', {
+            method: 'POST',
+            body: JSON.stringify(entryData)
+        });
+
+        state.entries.unshift(entry);
+        renderEntries();
+        updateHeaderStats();
+
+        DOM.entryForm.reset();
+        DOM.entryRateTon.value = '';
+        DOM.entryRateMinute.value = '';
+        DOM.entryAmount.value = '';
+        handleEntryTypeChange();
+    } catch (error) {
+        alert(error.message || 'Failed to add entry');
+    }
+}
+
+async function deleteEntry(id) {
+    if (!confirm('Are you sure you want to delete this entry?')) return;
+
+    try {
+        await api(`/entries/${id}`, { method: 'DELETE' });
+        state.entries = state.entries.filter(e => e.id !== id);
+        renderEntries();
+        updateHeaderStats();
+    } catch (error) {
+        alert(error.message || 'Failed to delete entry');
+    }
+}
+
+function renderEntries() {
+    if (state.entries.length === 0) {
+        DOM.entriesList.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">📦</div>
+                <p>No entries yet. Add your first entry above.</p>
+            </div>
+        `;
+        return;
+    }
+
+    DOM.entriesList.innerHTML = state.entries.map(entry => {
+        const isPerMinute = entry.entry_type === 'per_minute';
+        
+        let detailTags = [];
+        if (entry.car_number) detailTags.push(`🚗 ${escapeHtml(entry.car_number)}`);
+        
+        if (isPerMinute) {
+            detailTags.push(`<span class="detail-tag type-minute">⏱️ ${entry.minutes} mins</span>`);
+            detailTags.push(`@ ${formatCurrency(entry.rate_per_minute)}/min`);
+        } else {
+            detailTags.push(`<span class="detail-tag type-ton">⚖️ ${entry.weight_kg?.toLocaleString()} KG</span>`);
+            detailTags.push(`${(entry.weight_kg / 1000).toFixed(3)} Tons`);
+            detailTags.push(`@ ${formatCurrency(entry.rate_per_ton)}/ton`);
+        }
+
+        return `
+            <div class="list-item">
+                <div class="list-item-header">
+                    <span class="list-item-title">${escapeHtml(entry.product_name)}</span>
+                    <span class="list-item-date">${formatDate(entry.created_at)}</span>
+                </div>
+                <div class="list-item-details">
+                    ${detailTags.map(t => t.includes('class=') ? t : `<span class="detail-tag">${t}</span>`).join('')}
+                </div>
+                ${entry.notes ? `<div class="list-item-details"><span class="detail-tag">📝 ${escapeHtml(entry.notes)}</span></div>` : ''}
+                <div class="list-item-footer">
+                    <span class="list-item-amount amount-positive">+${formatCurrency(entry.amount)}</span>
+                    <button class="delete-btn" onclick="deleteEntry(${entry.id})" title="Delete">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// ===== Vehicles Functions =====
 async function handleAddVehicle(e) {
     e.preventDefault();
 
@@ -311,8 +740,6 @@ async function handleAddVehicle(e) {
         state.vehicles.unshift(vehicle);
         renderVehicles();
         updateVehicleDropdowns();
-
-        // Reset form
         DOM.vehicleForm.reset();
     } catch (error) {
         alert(error.message || 'Failed to add vehicle');
@@ -369,196 +796,7 @@ function updateVehicleDropdowns() {
     DOM.expenseVehicle.innerHTML = options;
 }
 
-// ===== Rates =====
-async function handleAddRate(e) {
-    e.preventDefault();
-
-    const rateData = {
-        product_name: DOM.productName.value.trim(),
-        rate_per_ton: parseFloat(DOM.productRate.value)
-    };
-
-    try {
-        const rate = await api('/rates', {
-            method: 'POST',
-            body: JSON.stringify(rateData)
-        });
-
-        // Update or add to state
-        const existingIndex = state.rates.findIndex(r => r.id === rate.id);
-        if (existingIndex >= 0) {
-            state.rates[existingIndex] = rate;
-        } else {
-            state.rates.push(rate);
-        }
-
-        renderRates();
-        updateProductDropdown();
-
-        // Reset form
-        DOM.rateForm.reset();
-    } catch (error) {
-        alert(error.message || 'Failed to add rate');
-    }
-}
-
-async function deleteRate(id) {
-    if (!confirm('Are you sure you want to delete this rate?')) return;
-
-    try {
-        await api(`/rates/${id}`, { method: 'DELETE' });
-        state.rates = state.rates.filter(r => r.id !== id);
-        renderRates();
-        updateProductDropdown();
-    } catch (error) {
-        alert(error.message || 'Failed to delete rate');
-    }
-}
-
-function renderRates() {
-    if (state.rates.length === 0) {
-        DOM.ratesList.innerHTML = `
-            <div class="empty-state">
-                <div class="empty-state-icon">💰</div>
-                <p>No rates defined. Add product rates above.</p>
-            </div>
-        `;
-        return;
-    }
-
-    DOM.ratesList.innerHTML = state.rates.map(rate => `
-        <div class="rate-card">
-            <div class="rate-card-header">
-                <span class="rate-card-name">${escapeHtml(rate.product_name)}</span>
-                <button class="delete-btn" onclick="deleteRate(${rate.id})" title="Delete">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    </svg>
-                </button>
-            </div>
-            <div class="rate-card-value">${formatCurrency(rate.rate_per_ton)}</div>
-            <div class="rate-card-unit">per Ton</div>
-        </div>
-    `).join('');
-}
-
-function updateProductDropdown() {
-    DOM.entryProduct.innerHTML = '<option value="">Select product...</option>' +
-        state.rates.map(r => `<option value="${r.product_name}" data-rate="${r.rate_per_ton}">${escapeHtml(r.product_name)} (${formatCurrency(r.rate_per_ton)}/ton)</option>`).join('');
-}
-
-// ===== Entries =====
-function handleProductChange() {
-    const selected = DOM.entryProduct.selectedOptions[0];
-    if (selected && selected.dataset.rate) {
-        DOM.entryRate.value = formatCurrency(selected.dataset.rate);
-        calculateEntryAmount();
-    } else {
-        DOM.entryRate.value = '';
-        DOM.entryAmount.value = '';
-    }
-}
-
-function calculateEntryAmount() {
-    const selected = DOM.entryProduct.selectedOptions[0];
-    const weight = parseFloat(DOM.entryWeight.value) || 0;
-
-    if (selected && selected.dataset.rate && weight > 0) {
-        const rate = parseFloat(selected.dataset.rate);
-        const tons = weight / 1000;
-        const amount = tons * rate;
-        DOM.entryAmount.value = formatCurrency(amount);
-    } else {
-        DOM.entryAmount.value = '';
-    }
-}
-
-async function handleAddEntry(e) {
-    e.preventDefault();
-
-    const selected = DOM.entryProduct.selectedOptions[0];
-    if (!selected || !selected.dataset.rate) {
-        alert('Please select a product');
-        return;
-    }
-
-    const entryData = {
-        vehicle_id: DOM.entryVehicle.value || null,
-        product_name: DOM.entryProduct.value,
-        weight_kg: parseFloat(DOM.entryWeight.value),
-        rate_per_ton: parseFloat(selected.dataset.rate),
-        notes: DOM.entryNotes.value.trim()
-    };
-
-    try {
-        const entry = await api('/entries', {
-            method: 'POST',
-            body: JSON.stringify(entryData)
-        });
-
-        state.entries.unshift(entry);
-        renderEntries();
-        updateHeaderStats();
-
-        // Reset form
-        DOM.entryForm.reset();
-        DOM.entryRate.value = '';
-        DOM.entryAmount.value = '';
-    } catch (error) {
-        alert(error.message || 'Failed to add entry');
-    }
-}
-
-async function deleteEntry(id) {
-    if (!confirm('Are you sure you want to delete this entry?')) return;
-
-    try {
-        await api(`/entries/${id}`, { method: 'DELETE' });
-        state.entries = state.entries.filter(e => e.id !== id);
-        renderEntries();
-        updateHeaderStats();
-    } catch (error) {
-        alert(error.message || 'Failed to delete entry');
-    }
-}
-
-function renderEntries() {
-    if (state.entries.length === 0) {
-        DOM.entriesList.innerHTML = `
-            <div class="empty-state">
-                <div class="empty-state-icon">📦</div>
-                <p>No entries yet. Add your first entry above.</p>
-            </div>
-        `;
-        return;
-    }
-
-    DOM.entriesList.innerHTML = state.entries.map(entry => `
-        <div class="list-item">
-            <div class="list-item-header">
-                <span class="list-item-title">${escapeHtml(entry.product_name)}</span>
-                <span class="list-item-date">${formatDate(entry.created_at)}</span>
-            </div>
-            <div class="list-item-details">
-                ${entry.car_number ? `<span class="detail-tag">🚗 ${escapeHtml(entry.car_number)}</span>` : ''}
-                <span class="detail-tag">${entry.weight_kg.toLocaleString()} KG</span>
-                <span class="detail-tag">${(entry.weight_kg / 1000).toFixed(3)} Tons</span>
-                <span class="detail-tag">@ ${formatCurrency(entry.rate_per_ton)}/ton</span>
-            </div>
-            ${entry.notes ? `<div class="list-item-details"><span class="detail-tag">📝 ${escapeHtml(entry.notes)}</span></div>` : ''}
-            <div class="list-item-footer">
-                <span class="list-item-amount amount-positive">+${formatCurrency(entry.amount)}</span>
-                <button class="delete-btn" onclick="deleteEntry(${entry.id})" title="Delete">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    </svg>
-                </button>
-            </div>
-        </div>
-    `).join('');
-}
-
-// ===== Expenses =====
+// ===== Expenses Functions =====
 function handleExpenseTypeChange() {
     if (DOM.expenseType.value === 'fuel') {
         DOM.fuelFields.style.display = 'grid';
@@ -600,7 +838,6 @@ async function handleAddExpense(e) {
         renderExpenses();
         updateHeaderStats();
 
-        // Reset form
         DOM.expenseForm.reset();
         handleExpenseTypeChange();
     } catch (error) {
@@ -668,8 +905,18 @@ function renderExpenses() {
 // ===== Dashboard =====
 async function loadDashboard() {
     try {
-        state.dashboard = await api('/dashboard');
+        const { startDate, endDate } = getDateRange();
+        let url = '/dashboard';
+        
+        if (startDate && endDate) {
+            url += `?startDate=${startDate}&endDate=${endDate}`;
+        }
+
+        state.dashboard = await api(url);
         renderDashboard();
+        
+        // Update date range display
+        DOM.dateRangeDisplay.textContent = `Showing: ${getDateRangeLabel()}`;
     } catch (error) {
         console.error('Failed to load dashboard:', error);
     }
@@ -680,22 +927,22 @@ function renderDashboard() {
 
     const { summary, expensesByType, incomeByProduct, vehicleSummary, recentEntries, recentExpenses } = state.dashboard;
 
-    // Summary cards
-    DOM.dashTotalIncome.textContent = formatCurrency(summary.totalIncome);
-    DOM.dashTotalExpenses.textContent = formatCurrency(summary.totalExpenses);
-    DOM.dashNetProfit.textContent = formatCurrency(summary.netProfit);
+    // Summary cards (filtered period)
+    DOM.dashTotalIncome.textContent = formatCurrency(summary.filteredIncome);
+    DOM.dashTotalExpenses.textContent = formatCurrency(summary.filteredExpenses);
+    DOM.dashNetProfit.textContent = formatCurrency(summary.filteredProfit);
     DOM.dashTotalVehicles.textContent = summary.totalVehicles;
 
-    // Monthly stats
-    DOM.monthIncome.textContent = formatCurrency(summary.currentMonthIncome);
-    DOM.monthExpenses.textContent = formatCurrency(summary.currentMonthExpenses);
-    DOM.monthProfit.textContent = formatCurrency(summary.currentMonthProfit);
+    // All time stats
+    DOM.allTimeIncome.textContent = formatCurrency(summary.allTimeIncome);
+    DOM.allTimeExpenses.textContent = formatCurrency(summary.allTimeExpenses);
+    DOM.allTimeProfit.textContent = formatCurrency(summary.allTimeProfit);
 
     // Expenses by type chart
-    renderExpensesByTypeChart(expensesByType, summary.totalExpenses);
+    renderExpensesByTypeChart(expensesByType, summary.filteredExpenses);
 
     // Income by product chart
-    renderIncomeByProductChart(incomeByProduct, summary.totalIncome);
+    renderIncomeByProductChart(incomeByProduct, summary.filteredIncome);
 
     // Vehicle summary
     renderVehicleSummaryTable(vehicleSummary);
@@ -708,7 +955,7 @@ function renderDashboard() {
 
 function renderExpensesByTypeChart(data, total) {
     if (!data || data.length === 0) {
-        DOM.expensesByType.innerHTML = '<div class="empty-state"><p>No expense data yet</p></div>';
+        DOM.expensesByType.innerHTML = '<div class="empty-state"><p>No expense data for this period</p></div>';
         return;
     }
 
@@ -730,7 +977,7 @@ function renderExpensesByTypeChart(data, total) {
             <div class="chart-bar">
                 <span class="chart-bar-label">${getExpenseTypeLabel(item.expense_type)}</span>
                 <div class="chart-bar-track">
-                    <div class="chart-bar-fill" style="width: ${percentage}%; background: ${color}">
+                    <div class="chart-bar-fill" style="width: ${Math.max(percentage, 10)}%; background: ${color}">
                         ${formatCurrency(item.total)}
                     </div>
                 </div>
@@ -741,7 +988,7 @@ function renderExpensesByTypeChart(data, total) {
 
 function renderIncomeByProductChart(data, total) {
     if (!data || data.length === 0) {
-        DOM.incomeByProduct.innerHTML = '<div class="empty-state"><p>No income data yet</p></div>';
+        DOM.incomeByProduct.innerHTML = '<div class="empty-state"><p>No income data for this period</p></div>';
         return;
     }
 
@@ -755,7 +1002,7 @@ function renderIncomeByProductChart(data, total) {
             <div class="chart-bar">
                 <span class="chart-bar-label">${escapeHtml(item.product_name)}</span>
                 <div class="chart-bar-track">
-                    <div class="chart-bar-fill" style="width: ${percentage}%; background: ${color}">
+                    <div class="chart-bar-fill" style="width: ${Math.max(percentage, 10)}%; background: ${color}">
                         ${formatCurrency(item.total)}
                     </div>
                 </div>
@@ -766,7 +1013,7 @@ function renderIncomeByProductChart(data, total) {
 
 function renderVehicleSummaryTable(data) {
     if (!data || data.length === 0) {
-        DOM.vehicleSummary.innerHTML = '<div class="empty-state"><p>No vehicle data yet</p></div>';
+        DOM.vehicleSummary.innerHTML = '<div class="empty-state"><p>No vehicle data</p></div>';
         return;
     }
 
@@ -803,7 +1050,7 @@ function renderRecentActivity() {
     const data = isEntries ? state.dashboard.recentEntries : state.dashboard.recentExpenses;
 
     if (!data || data.length === 0) {
-        DOM.recentActivity.innerHTML = `<div class="empty-state"><p>No recent ${state.currentActivityTab}</p></div>`;
+        DOM.recentActivity.innerHTML = `<div class="empty-state"><p>No recent ${state.currentActivityTab} for this period</p></div>`;
         return;
     }
 
@@ -850,7 +1097,6 @@ function renderAll() {
     updateVehicleDropdowns();
     updateProductDropdown();
     updateHeaderStats();
-    renderDashboard();
 }
 
 // ===== Global Functions for onclick handlers =====
@@ -858,4 +1104,3 @@ window.deleteVehicle = deleteVehicle;
 window.deleteRate = deleteRate;
 window.deleteEntry = deleteEntry;
 window.deleteExpense = deleteExpense;
-

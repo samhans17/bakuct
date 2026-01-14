@@ -51,6 +51,11 @@
                     <span class="stat stat-expense" id="headerExpense">Expense: Rs. 0</span>
                     <span class="stat stat-profit" id="headerProfit">Profit: Rs. 0</span>
                 </div>
+                <!-- Theme Toggle -->
+                <button class="theme-toggle" id="themeToggle" title="Toggle theme">
+                    <span class="theme-icon-light">☀️</span>
+                    <span class="theme-icon-dark">🌙</span>
+                </button>
                 <button class="btn btn-secondary btn-small" id="logoutBtn">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
@@ -90,27 +95,53 @@
         <main class="tab-content">
             <!-- Dashboard Tab -->
             <div class="tab-panel active" id="dashboard-panel">
+                <!-- Date Range Filter -->
+                <div class="date-filter-bar">
+                    <div class="date-filter-group">
+                        <label>📅 Date Range:</label>
+                        <select id="dateRangePreset">
+                            <option value="current_month">Current Month</option>
+                            <option value="last_month">Last Month</option>
+                            <option value="last_7_days">Last 7 Days</option>
+                            <option value="last_30_days">Last 30 Days</option>
+                            <option value="this_year">This Year</option>
+                            <option value="all_time">All Time</option>
+                            <option value="custom">Custom Range</option>
+                        </select>
+                    </div>
+                    <div class="date-filter-group custom-dates hidden" id="customDatesGroup">
+                        <label>From:</label>
+                        <input type="date" id="startDate">
+                        <label>To:</label>
+                        <input type="date" id="endDate">
+                        <button class="btn btn-small btn-secondary" id="applyDateFilter">Apply</button>
+                    </div>
+                    <div class="date-filter-info">
+                        <span id="dateRangeDisplay">Showing: Current Month</span>
+                    </div>
+                </div>
+
                 <div class="dashboard-grid">
                     <!-- Summary Cards -->
                     <div class="summary-cards">
                         <div class="summary-card card-income">
                             <div class="card-icon">📈</div>
                             <div class="card-content">
-                                <span class="card-label">Total Income</span>
+                                <span class="card-label">Period Income</span>
                                 <span class="card-value" id="dashTotalIncome">Rs. 0</span>
                             </div>
                         </div>
                         <div class="summary-card card-expense">
                             <div class="card-icon">📉</div>
                             <div class="card-content">
-                                <span class="card-label">Total Expenses</span>
+                                <span class="card-label">Period Expenses</span>
                                 <span class="card-value" id="dashTotalExpenses">Rs. 0</span>
                             </div>
                         </div>
                         <div class="summary-card card-profit">
                             <div class="card-icon">💵</div>
                             <div class="card-content">
-                                <span class="card-label">Net Profit</span>
+                                <span class="card-label">Period Profit</span>
                                 <span class="card-value" id="dashNetProfit">Rs. 0</span>
                             </div>
                         </div>
@@ -123,21 +154,21 @@
                         </div>
                     </div>
 
-                    <!-- Monthly Stats -->
-                    <div class="monthly-stats panel">
-                        <h3 class="panel-title">📅 This Month</h3>
+                    <!-- All Time Stats -->
+                    <div class="alltime-stats panel">
+                        <h3 class="panel-title">📊 All Time Summary</h3>
                         <div class="month-cards">
                             <div class="month-card">
-                                <span class="month-label">Income</span>
-                                <span class="month-value income" id="monthIncome">Rs. 0</span>
+                                <span class="month-label">Total Income</span>
+                                <span class="month-value income" id="allTimeIncome">Rs. 0</span>
                             </div>
                             <div class="month-card">
-                                <span class="month-label">Expenses</span>
-                                <span class="month-value expense" id="monthExpenses">Rs. 0</span>
+                                <span class="month-label">Total Expenses</span>
+                                <span class="month-value expense" id="allTimeExpenses">Rs. 0</span>
                             </div>
                             <div class="month-card">
-                                <span class="month-label">Profit</span>
-                                <span class="month-value profit" id="monthProfit">Rs. 0</span>
+                                <span class="month-label">Total Profit</span>
+                                <span class="month-value profit" id="allTimeProfit">Rs. 0</span>
                             </div>
                         </div>
                     </div>
@@ -185,19 +216,42 @@
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label for="entryProduct">Product</label>
+                                <label for="entryProduct">Product/Service</label>
                                 <select id="entryProduct" required>
                                     <option value="">Select product...</option>
                                 </select>
                             </div>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="entryWeight">Weight (KG)</label>
-                                    <input type="number" id="entryWeight" placeholder="0" step="0.01" min="0" required>
+                            <div class="form-group">
+                                <label for="entryType">Entry Type</label>
+                                <select id="entryType">
+                                    <option value="per_ton">Per Ton (Weight Based)</option>
+                                    <option value="per_minute">Per Minute (Time Based)</option>
+                                </select>
+                            </div>
+                            <!-- Per Ton Fields -->
+                            <div class="entry-fields per-ton-fields" id="perTonFields">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="entryWeight">Weight (KG)</label>
+                                        <input type="number" id="entryWeight" placeholder="0" step="0.01" min="0">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="entryRateTon">Rate/Ton</label>
+                                        <input type="text" id="entryRateTon" readonly placeholder="Auto">
+                                    </div>
                                 </div>
-                                <div class="form-group">
-                                    <label for="entryRate">Rate/Ton</label>
-                                    <input type="text" id="entryRate" readonly placeholder="Auto">
+                            </div>
+                            <!-- Per Minute Fields -->
+                            <div class="entry-fields per-minute-fields hidden" id="perMinuteFields">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="entryMinutes">Minutes</label>
+                                        <input type="number" id="entryMinutes" placeholder="0" step="1" min="0">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="entryRateMinute">Rate/Minute</label>
+                                        <input type="text" id="entryRateMinute" readonly placeholder="Auto">
+                                    </div>
                                 </div>
                             </div>
                             <div class="form-group">
@@ -293,6 +347,7 @@
                                     <option value="pickup">Pickup</option>
                                     <option value="dumper">Dumper</option>
                                     <option value="tanker">Tanker</option>
+                                    <option value="crane">Crane</option>
                                     <option value="other">Other</option>
                                 </select>
                             </div>
@@ -313,12 +368,27 @@
                         <h3 class="panel-title">➕ Add Product Rate</h3>
                         <form id="rateForm">
                             <div class="form-group">
-                                <label for="productName">Product Name *</label>
-                                <input type="text" id="productName" placeholder="e.g., Wheat, Rice..." required>
+                                <label for="productName">Product/Service Name *</label>
+                                <input type="text" id="productName" placeholder="e.g., Wheat, Crane Service..." required>
                             </div>
                             <div class="form-group">
-                                <label for="productRate">Rate per Ton (Rs.) *</label>
-                                <input type="number" id="productRate" placeholder="0" step="0.01" min="0" required>
+                                <label for="rateType">Rate Type</label>
+                                <select id="rateType">
+                                    <option value="per_ton">Per Ton (Weight Based)</option>
+                                    <option value="per_minute">Per Minute (Time Based)</option>
+                                </select>
+                            </div>
+                            <div class="rate-fields per-ton-rate" id="perTonRateField">
+                                <div class="form-group">
+                                    <label for="productRateTon">Rate per Ton (Rs.) *</label>
+                                    <input type="number" id="productRateTon" placeholder="0" step="0.01" min="0">
+                                </div>
+                            </div>
+                            <div class="rate-fields per-minute-rate hidden" id="perMinuteRateField">
+                                <div class="form-group">
+                                    <label for="productRateMinute">Rate per Minute (Rs.) *</label>
+                                    <input type="number" id="productRateMinute" placeholder="0" step="0.01" min="0">
+                                </div>
                             </div>
                             <button type="submit" class="btn btn-primary">+ Add Rate</button>
                         </form>
