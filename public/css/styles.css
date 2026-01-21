@@ -670,6 +670,11 @@ body::before {
     grid-column: span 2;
 }
 
+/* Party Summary */
+.party-summary {
+    grid-column: span 2;
+}
+
 .table-container {
     overflow-x: auto;
 }
@@ -1031,6 +1036,7 @@ body::before {
     .expenses-chart,
     .income-chart,
     .vehicle-summary,
+    .party-summary,
     .recent-activity {
         grid-column: span 2;
     }

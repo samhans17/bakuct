@@ -89,6 +89,10 @@
                 <span class="tab-icon">💰</span>
                 Rates
             </button>
+            <button class="tab-btn" data-tab="parties">
+                <span class="tab-icon">👥</span>
+                Parties
+            </button>
         </nav>
 
         <!-- Tab Content -->
@@ -191,6 +195,12 @@
                         <div id="vehicleSummary" class="table-container"></div>
                     </div>
 
+                    <!-- Party Summary -->
+                    <div class="party-summary panel">
+                        <h3 class="panel-title">👥 Party Accounts</h3>
+                        <div id="partySummary" class="table-container"></div>
+                    </div>
+
                     <!-- Recent Activity -->
                     <div class="recent-activity panel">
                         <h3 class="panel-title">🕐 Recent Activity</h3>
@@ -209,6 +219,12 @@
                     <div class="form-panel panel">
                         <h3 class="panel-title">➕ Add New Entry</h3>
                         <form id="entryForm">
+                            <div class="form-group">
+                                <label for="entryParty">Party/Client *</label>
+                                <select id="entryParty" required>
+                                    <option value="">Select party...</option>
+                                </select>
+                            </div>
                             <div class="form-group">
                                 <label for="entryVehicle">Vehicle</label>
                                 <select id="entryVehicle">
@@ -399,6 +415,92 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Parties Tab -->
+            <div class="tab-panel" id="parties-panel">
+                <div class="panel-layout">
+                    <div class="form-panel panel">
+                        <h3 class="panel-title">➕ Add New Party</h3>
+                        <form id="partyForm">
+                            <div class="form-group">
+                                <label for="partyName">Party Name *</label>
+                                <input type="text" id="partyName" placeholder="e.g., ABC Company..." required>
+                            </div>
+                            <div class="form-group">
+                                <label for="contactPerson">Contact Person</label>
+                                <input type="text" id="contactPerson" placeholder="Contact name...">
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="partyPhone">Phone</label>
+                                    <input type="text" id="partyPhone" placeholder="Phone number...">
+                                </div>
+                                <div class="form-group">
+                                    <label for="partyEmail">Email</label>
+                                    <input type="email" id="partyEmail" placeholder="Email...">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="partyAddress">Address</label>
+                                <input type="text" id="partyAddress" placeholder="Address...">
+                            </div>
+                            <div class="form-group">
+                                <label for="partyNotes">Notes</label>
+                                <input type="text" id="partyNotes" placeholder="Additional notes...">
+                            </div>
+                            <button type="submit" class="btn btn-primary">+ Add Party</button>
+                        </form>
+
+                        <!-- Payment Form -->
+                        <div style="margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border-color);">
+                            <h3 class="panel-title">💵 Record Payment</h3>
+                            <form id="paymentForm">
+                                <div class="form-group">
+                                    <label for="paymentParty">Party *</label>
+                                    <select id="paymentParty" required>
+                                        <option value="">Select party...</option>
+                                    </select>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="paymentAmount">Amount (Rs.) *</label>
+                                        <input type="number" id="paymentAmount" placeholder="0" step="0.01" min="0" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="paymentDate">Payment Date *</label>
+                                        <input type="date" id="paymentDate" required>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="paymentMethod">Payment Method</label>
+                                    <select id="paymentMethod">
+                                        <option value="cash">Cash</option>
+                                        <option value="bank">Bank Transfer</option>
+                                        <option value="cheque">Cheque</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="paymentReference">Reference Number</label>
+                                    <input type="text" id="paymentReference" placeholder="Cheque/Transaction number...">
+                                </div>
+                                <div class="form-group">
+                                    <label for="paymentNotes">Notes</label>
+                                    <input type="text" id="paymentNotes" placeholder="Additional notes...">
+                                </div>
+                                <button type="submit" class="btn btn-primary">+ Record Payment</button>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="list-panel panel">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <h3 class="panel-title" style="margin: 0;">👥 All Parties</h3>
+                            <button class="btn btn-small btn-secondary" id="viewPaymentsBtn">View Payments</button>
+                        </div>
+                        <div id="partiesList" class="data-list"></div>
+                    </div>
+                </div>
+            </div>
         </main>
     </div>
 
@@ -406,4 +508,5 @@
     <script src="js/app.js"></script>
 </body>
 </html>
+
 

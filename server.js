@@ -50,9 +50,24 @@ db.exec(`
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
-    -- Entries table (updated with entry_type and minutes)
+    -- Parties table (clients/customers)
+    CREATE TABLE IF NOT EXISTS parties (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL,
+        contact_person TEXT,
+        phone TEXT,
+        email TEXT,
+        address TEXT,
+        status TEXT DEFAULT 'active',
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Entries table (updated with entry_type, minutes, and party_id)
     CREATE TABLE IF NOT EXISTS entries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        party_id INTEGER,
         vehicle_id INTEGER,
         product_name TEXT NOT NULL,
         entry_type TEXT DEFAULT 'per_ton',
@@ -63,6 +78,7 @@ db.exec(`
         amount REAL NOT NULL,
         notes TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (party_id) REFERENCES parties(id),
         FOREIGN KEY (vehicle_id) REFERENCES vehicles(id)
     );
 
@@ -77,6 +93,19 @@ db.exec(`
         description TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (vehicle_id) REFERENCES vehicles(id)
+    );
+
+    -- Payments table (payments received from parties)
+    CREATE TABLE IF NOT EXISTS payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        party_id INTEGER NOT NULL,
+        amount REAL NOT NULL,
+        payment_date DATE NOT NULL,
+        payment_method TEXT DEFAULT 'cash',
+        reference_number TEXT,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (party_id) REFERENCES parties(id)
     );
 
     -- Insert default admin user if not exists
@@ -99,6 +128,28 @@ try {
 try {
     db.exec(`ALTER TABLE entries ADD COLUMN rate_per_minute REAL`);
 } catch (e) { /* column exists */ }
+try {
+    db.exec(`ALTER TABLE entries ADD COLUMN party_id INTEGER`);
+} catch (e) { /* column exists */ }
+
+// Create default party and link existing entries
+try {
+    let defaultParty = db.prepare('SELECT * FROM parties WHERE name = ?').get('Cash/General');
+    
+    if (!defaultParty) {
+        const stmt = db.prepare(`
+            INSERT INTO parties (name, contact_person, notes, status) 
+            VALUES (?, ?, ?, ?)
+        `);
+        const result = stmt.run('Cash/General', 'System', 'Default party for existing entries and cash transactions', 'active');
+        defaultParty = db.prepare('SELECT * FROM parties WHERE id = ?').get(result.lastInsertRowid);
+    }
+    
+    // Link existing entries without party to default party
+    db.prepare('UPDATE entries SET party_id = ? WHERE party_id IS NULL').run(defaultParty.id);
+} catch (e) {
+    console.error('Migration error:', e.message);
+}
 
 // ============ AUTH ROUTES ============
 app.post('/api/login', (req, res) => {
@@ -218,22 +269,201 @@ app.delete('/api/rates/:id', (req, res) => {
     }
 });
 
+// ============ PARTIES ROUTES ============
+app.get('/api/parties', (req, res) => {
+    const parties = db.prepare('SELECT * FROM parties ORDER BY name').all();
+    res.json(parties);
+});
+
+app.post('/api/parties', (req, res) => {
+    const { name, contact_person, phone, email, address, notes } = req.body;
+    
+    if (!name) {
+        return res.status(400).json({ error: 'Party name is required' });
+    }
+    
+    try {
+        const stmt = db.prepare(`
+            INSERT INTO parties (name, contact_person, phone, email, address, notes) 
+            VALUES (?, ?, ?, ?, ?, ?)
+        `);
+        const result = stmt.run(
+            name, 
+            contact_person || null, 
+            phone || null, 
+            email || null, 
+            address || null, 
+            notes || null
+        );
+        
+        const party = db.prepare('SELECT * FROM parties WHERE id = ?').get(result.lastInsertRowid);
+        res.json(party);
+    } catch (err) {
+        if (err.message.includes('UNIQUE constraint failed')) {
+            res.status(400).json({ error: 'Party with this name already exists' });
+        } else {
+            res.status(500).json({ error: err.message });
+        }
+    }
+});
+
+app.put('/api/parties/:id', (req, res) => {
+    const { id } = req.params;
+    const { name, contact_person, phone, email, address, status, notes } = req.body;
+    
+    try {
+        db.prepare(`
+            UPDATE parties 
+            SET name = ?, contact_person = ?, phone = ?, email = ?, address = ?, status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+        `).run(name, contact_person, phone, email, address, status, notes, id);
+        
+        const party = db.prepare('SELECT * FROM parties WHERE id = ?').get(id);
+        res.json(party);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/api/parties/:id', (req, res) => {
+    const { id } = req.params;
+    
+    // Check if party has entries
+    const entryCount = db.prepare('SELECT COUNT(*) as count FROM entries WHERE party_id = ?').get(id).count;
+    
+    if (entryCount > 0) {
+        return res.status(400).json({ error: `Cannot delete party. It has ${entryCount} entries. Please reassign entries first.` });
+    }
+    
+    try {
+        db.prepare('DELETE FROM parties WHERE id = ?').run(id);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Get party summary (total billed, total paid, balance)
+app.get('/api/parties/:id/summary', (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        const totalBilled = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM entries WHERE party_id = ?').get(id).total;
+        const totalPaid = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE party_id = ?').get(id).total;
+        const balance = totalBilled - totalPaid;
+        
+        const party = db.prepare('SELECT * FROM parties WHERE id = ?').get(id);
+        
+        res.json({
+            party,
+            totalBilled,
+            totalPaid,
+            balance
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ============ PAYMENTS ROUTES ============
+app.get('/api/payments', (req, res) => {
+    const { party_id } = req.query;
+    
+    let query = `
+        SELECT p.*, pt.name as party_name 
+        FROM payments p 
+        LEFT JOIN parties pt ON p.party_id = pt.id
+    `;
+    
+    if (party_id) {
+        query += ' WHERE p.party_id = ?';
+        const payments = db.prepare(query + ' ORDER BY p.payment_date DESC').all(party_id);
+        res.json(payments);
+    } else {
+        const payments = db.prepare(query + ' ORDER BY p.payment_date DESC').all();
+        res.json(payments);
+    }
+});
+
+app.post('/api/payments', (req, res) => {
+    const { party_id, amount, payment_date, payment_method, reference_number, notes } = req.body;
+    
+    if (!party_id || !amount || !payment_date) {
+        return res.status(400).json({ error: 'Party, amount, and payment date are required' });
+    }
+    
+    try {
+        const stmt = db.prepare(`
+            INSERT INTO payments (party_id, amount, payment_date, payment_method, reference_number, notes) 
+            VALUES (?, ?, ?, ?, ?, ?)
+        `);
+        const result = stmt.run(
+            party_id, 
+            amount, 
+            payment_date, 
+            payment_method || 'cash', 
+            reference_number || null, 
+            notes || null
+        );
+        
+        const payment = db.prepare(`
+            SELECT p.*, pt.name as party_name 
+            FROM payments p 
+            LEFT JOIN parties pt ON p.party_id = pt.id 
+            WHERE p.id = ?
+        `).get(result.lastInsertRowid);
+        res.json(payment);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/api/payments/:id', (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        db.prepare('DELETE FROM payments WHERE id = ?').run(id);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ============ ENTRIES ROUTES ============
 app.get('/api/entries', (req, res) => {
-    const entries = db.prepare(`
-        SELECT e.*, v.car_number 
+    const { party_id } = req.query;
+    
+    let query = `
+        SELECT e.*, v.car_number, pt.name as party_name 
         FROM entries e 
         LEFT JOIN vehicles v ON e.vehicle_id = v.id 
-        ORDER BY e.created_at DESC
-    `).all();
-    res.json(entries);
+        LEFT JOIN parties pt ON e.party_id = pt.id
+    `;
+    
+    if (party_id) {
+        query += ' WHERE e.party_id = ?';
+        const entries = db.prepare(query + ' ORDER BY e.created_at DESC').all(party_id);
+        res.json(entries);
+    } else {
+        const entries = db.prepare(query + ' ORDER BY e.created_at DESC').all();
+        res.json(entries);
+    }
 });
 
 app.post('/api/entries', (req, res) => {
-    const { vehicle_id, product_name, entry_type, weight_kg, minutes, rate_per_ton, rate_per_minute, notes } = req.body;
+    const { party_id, vehicle_id, product_name, entry_type, weight_kg, minutes, rate_per_ton, rate_per_minute, notes } = req.body;
     
     if (!product_name) {
         return res.status(400).json({ error: 'Product name is required' });
+    }
+    
+    // Get default party if not provided
+    let finalPartyId = party_id;
+    if (!finalPartyId) {
+        const defaultParty = db.prepare('SELECT * FROM parties WHERE name = ?').get('Cash/General');
+        if (defaultParty) {
+            finalPartyId = defaultParty.id;
+        }
     }
     
     let amount = 0;
@@ -252,10 +482,11 @@ app.post('/api/entries', (req, res) => {
     
     try {
         const stmt = db.prepare(`
-            INSERT INTO entries (vehicle_id, product_name, entry_type, weight_kg, minutes, rate_per_ton, rate_per_minute, amount, notes) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO entries (party_id, vehicle_id, product_name, entry_type, weight_kg, minutes, rate_per_ton, rate_per_minute, amount, notes) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         const result = stmt.run(
+            finalPartyId || null,
             vehicle_id || null, 
             product_name, 
             entry_type || 'per_ton',
@@ -268,9 +499,10 @@ app.post('/api/entries', (req, res) => {
         );
         
         const entry = db.prepare(`
-            SELECT e.*, v.car_number 
+            SELECT e.*, v.car_number, pt.name as party_name 
             FROM entries e 
             LEFT JOIN vehicles v ON e.vehicle_id = v.id 
+            LEFT JOIN parties pt ON e.party_id = pt.id
             WHERE e.id = ?
         `).get(result.lastInsertRowid);
         res.json(entry);
@@ -386,13 +618,32 @@ app.get('/api/dashboard', (req, res) => {
         
         // Recent entries (last 5, filtered)
         const recentEntries = db.prepare(`
-            SELECT e.*, v.car_number 
+            SELECT e.*, v.car_number, pt.name as party_name 
             FROM entries e 
             LEFT JOIN vehicles v ON e.vehicle_id = v.id 
+            LEFT JOIN parties pt ON e.party_id = pt.id
             WHERE 1=1 ${entriesDateFilter}
             ORDER BY e.created_at DESC 
             LIMIT 5
         `).all(...entriesParams);
+        
+        // Party-wise summary
+        let partySummaryQuery = `
+            SELECT 
+                pt.id,
+                pt.name,
+                pt.contact_person,
+                pt.phone,
+                COALESCE(SUM(e.amount), 0) as total_billed,
+                COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.party_id = pt.id), 0) as total_paid
+            FROM parties pt
+            LEFT JOIN entries e ON pt.id = e.party_id ${entriesDateFilter}
+            WHERE (pt.status = 'active' OR pt.status IS NULL)
+            GROUP BY pt.id
+            HAVING total_billed > 0 OR total_paid > 0
+            ORDER BY total_billed DESC
+        `;
+        const partySummary = db.prepare(partySummaryQuery).all(...entriesParams);
         
         // Recent expenses (last 5, filtered)
         const recentExpenses = db.prepare(`
@@ -443,6 +694,7 @@ app.get('/api/dashboard', (req, res) => {
             expensesByType,
             incomeByProduct,
             vehicleSummary,
+            partySummary,
             recentEntries,
             recentExpenses,
             dateRange: {

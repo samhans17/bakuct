@@ -12,6 +12,8 @@ let state = {
     rates: [],
     entries: [],
     expenses: [],
+    parties: [],
+    payments: [],
     dashboard: null,
     currentActivityTab: 'entries',
     dateFilter: {
@@ -74,8 +76,11 @@ function initializeDOM() {
     DOM.expenseForm = document.getElementById('expenseForm');
     DOM.vehicleForm = document.getElementById('vehicleForm');
     DOM.rateForm = document.getElementById('rateForm');
+    DOM.partyForm = document.getElementById('partyForm');
+    DOM.paymentForm = document.getElementById('paymentForm');
 
     // Entry form fields
+    DOM.entryParty = document.getElementById('entryParty');
     DOM.entryVehicle = document.getElementById('entryVehicle');
     DOM.entryProduct = document.getElementById('entryProduct');
     DOM.entryType = document.getElementById('entryType');
@@ -110,11 +115,34 @@ function initializeDOM() {
     DOM.productRateTon = document.getElementById('productRateTon');
     DOM.productRateMinute = document.getElementById('productRateMinute');
 
+    // Party form fields
+    DOM.partyName = document.getElementById('partyName');
+    DOM.contactPerson = document.getElementById('contactPerson');
+    DOM.partyPhone = document.getElementById('partyPhone');
+    DOM.partyEmail = document.getElementById('partyEmail');
+    DOM.partyAddress = document.getElementById('partyAddress');
+    DOM.partyNotes = document.getElementById('partyNotes');
+
+    // Payment form fields
+    DOM.paymentParty = document.getElementById('paymentParty');
+    DOM.paymentAmount = document.getElementById('paymentAmount');
+    DOM.paymentDate = document.getElementById('paymentDate');
+    DOM.paymentMethod = document.getElementById('paymentMethod');
+    DOM.paymentReference = document.getElementById('paymentReference');
+    DOM.paymentNotes = document.getElementById('paymentNotes');
+    DOM.viewPaymentsBtn = document.getElementById('viewPaymentsBtn');
+    
+    // Set default payment date to today
+    if (DOM.paymentDate) {
+        DOM.paymentDate.value = new Date().toISOString().split('T')[0];
+    }
+
     // Lists
     DOM.entriesList = document.getElementById('entriesList');
     DOM.expensesList = document.getElementById('expensesList');
     DOM.vehiclesList = document.getElementById('vehiclesList');
     DOM.ratesList = document.getElementById('ratesList');
+    DOM.partiesList = document.getElementById('partiesList');
 
     // Dashboard elements
     DOM.dashTotalIncome = document.getElementById('dashTotalIncome');
@@ -127,6 +155,7 @@ function initializeDOM() {
     DOM.expensesByType = document.getElementById('expensesByType');
     DOM.incomeByProduct = document.getElementById('incomeByProduct');
     DOM.vehicleSummary = document.getElementById('vehicleSummary');
+    DOM.partySummary = document.getElementById('partySummary');
     DOM.recentActivity = document.getElementById('recentActivity');
 
     // Activity tabs
@@ -157,6 +186,8 @@ function initializeEventListeners() {
     DOM.expenseForm.addEventListener('submit', handleAddExpense);
     DOM.vehicleForm.addEventListener('submit', handleAddVehicle);
     DOM.rateForm.addEventListener('submit', handleAddRate);
+    DOM.partyForm.addEventListener('submit', handleAddParty);
+    DOM.paymentForm.addEventListener('submit', handleAddPayment);
 
     // Entry form - type and product selection
     DOM.entryType.addEventListener('change', handleEntryTypeChange);
@@ -258,17 +289,21 @@ async function showApp() {
 // ===== Data Loading =====
 async function loadAllData() {
     try {
-        const [vehicles, rates, entries, expenses] = await Promise.all([
+        const [vehicles, rates, entries, expenses, parties, payments] = await Promise.all([
             api('/vehicles'),
             api('/rates'),
             api('/entries'),
-            api('/expenses')
+            api('/expenses'),
+            api('/parties'),
+            api('/payments')
         ]);
 
         state.vehicles = vehicles;
         state.rates = rates;
         state.entries = entries;
         state.expenses = expenses;
+        state.parties = parties;
+        state.payments = payments;
 
         renderAll();
         await loadDashboard();
@@ -374,6 +409,10 @@ function switchTab(tabId) {
 
     if (tabId === 'dashboard') {
         loadDashboard();
+    }
+    
+    if (tabId === 'parties') {
+        renderParties();
     }
 }
 
@@ -613,8 +652,14 @@ async function handleAddEntry(e) {
         return;
     }
 
+    if (!DOM.entryParty.value) {
+        alert('Please select a party');
+        return;
+    }
+
     const entryType = DOM.entryType.value;
     const entryData = {
+        party_id: DOM.entryParty.value,
         vehicle_id: DOM.entryVehicle.value || null,
         product_name: DOM.entryProduct.value,
         entry_type: entryType,
@@ -653,6 +698,7 @@ async function handleAddEntry(e) {
         DOM.entryRateTon.value = '';
         DOM.entryRateMinute.value = '';
         DOM.entryAmount.value = '';
+        updatePartyDropdown();
         handleEntryTypeChange();
     } catch (error) {
         alert(error.message || 'Failed to add entry');
@@ -687,6 +733,7 @@ function renderEntries() {
         const isPerMinute = entry.entry_type === 'per_minute';
         
         let detailTags = [];
+        if (entry.party_name) detailTags.push(`👥 ${escapeHtml(entry.party_name)}`);
         if (entry.car_number) detailTags.push(`🚗 ${escapeHtml(entry.car_number)}`);
         
         if (isPerMinute) {
@@ -925,7 +972,7 @@ async function loadDashboard() {
 function renderDashboard() {
     if (!state.dashboard) return;
 
-    const { summary, expensesByType, incomeByProduct, vehicleSummary, recentEntries, recentExpenses } = state.dashboard;
+    const { summary, expensesByType, incomeByProduct, vehicleSummary, partySummary, recentEntries, recentExpenses } = state.dashboard;
 
     // Summary cards (filtered period)
     DOM.dashTotalIncome.textContent = formatCurrency(summary.filteredIncome);
@@ -946,6 +993,11 @@ function renderDashboard() {
 
     // Vehicle summary
     renderVehicleSummaryTable(vehicleSummary);
+
+    // Party summary
+    if (partySummary) {
+        renderPartySummaryTable(partySummary);
+    }
 
     // Recent activity
     state.dashboard.recentEntries = recentEntries;
@@ -1043,6 +1095,42 @@ function renderVehicleSummaryTable(data) {
     `;
 }
 
+function renderPartySummaryTable(data) {
+    if (!data || data.length === 0) {
+        DOM.partySummary.innerHTML = '<div class="empty-state"><p>No party data for this period</p></div>';
+        return;
+    }
+
+    DOM.partySummary.innerHTML = `
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Party</th>
+                    <th>Contact</th>
+                    <th>Billed</th>
+                    <th>Paid</th>
+                    <th>Balance</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${data.map(p => {
+                    const balance = p.total_billed - p.total_paid;
+                    const balanceColor = balance > 0 ? 'var(--accent-danger)' : balance < 0 ? 'var(--accent-success)' : 'var(--text-secondary)';
+                    return `
+                        <tr>
+                            <td><strong>${escapeHtml(p.name)}</strong></td>
+                            <td>${escapeHtml(p.contact_person || '-')}</td>
+                            <td style="color: var(--accent-success)">${formatCurrency(p.total_billed)}</td>
+                            <td style="color: var(--accent-primary)">${formatCurrency(p.total_paid)}</td>
+                            <td style="color: ${balanceColor}; font-weight: 600;">${formatCurrency(Math.abs(balance))} ${balance > 0 ? '(Due)' : balance < 0 ? '(Advance)' : ''}</td>
+                        </tr>
+                    `;
+                }).join('')}
+            </tbody>
+        </table>
+    `;
+}
+
 function renderRecentActivity() {
     if (!state.dashboard) return;
 
@@ -1059,7 +1147,7 @@ function renderRecentActivity() {
             <div class="activity-item">
                 <div class="activity-info">
                     <span class="activity-title">${escapeHtml(item.product_name)}</span>
-                    <span class="activity-meta">${item.car_number ? item.car_number + ' • ' : ''}${formatShortDate(item.created_at)}</span>
+                    <span class="activity-meta">${item.party_name ? item.party_name + ' • ' : ''}${item.car_number ? item.car_number + ' • ' : ''}${formatShortDate(item.created_at)}</span>
                 </div>
                 <span class="activity-amount income">+${formatCurrency(item.amount)}</span>
             </div>
@@ -1088,14 +1176,180 @@ function updateHeaderStats() {
     DOM.headerProfit.textContent = `Profit: ${formatCurrency(profit)}`;
 }
 
+// ===== Parties Functions =====
+async function handleAddParty(e) {
+    e.preventDefault();
+
+    const partyData = {
+        name: DOM.partyName.value.trim(),
+        contact_person: DOM.contactPerson.value.trim(),
+        phone: DOM.partyPhone.value.trim(),
+        email: DOM.partyEmail.value.trim(),
+        address: DOM.partyAddress.value.trim(),
+        notes: DOM.partyNotes.value.trim()
+    };
+
+    try {
+        const party = await api('/parties', {
+            method: 'POST',
+            body: JSON.stringify(partyData)
+        });
+
+        state.parties.push(party);
+        renderParties();
+        updatePartyDropdown();
+
+        DOM.partyForm.reset();
+    } catch (error) {
+        alert(error.message || 'Failed to add party');
+    }
+}
+
+async function deleteParty(id) {
+    if (!confirm('Are you sure you want to delete this party? Entries linked to this party will need to be reassigned.')) return;
+
+    try {
+        await api(`/parties/${id}`, { method: 'DELETE' });
+        state.parties = state.parties.filter(p => p.id !== id);
+        renderParties();
+        updatePartyDropdown();
+    } catch (error) {
+        alert(error.message || 'Failed to delete party');
+    }
+}
+
+function renderParties() {
+    if (state.parties.length === 0) {
+        DOM.partiesList.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">👥</div>
+                <p>No parties yet. Add your first party above.</p>
+            </div>
+        `;
+        return;
+    }
+
+    // Load party summaries
+    Promise.all(state.parties.map(party => 
+        api(`/parties/${party.id}/summary`)
+    )).then(summaries => {
+        DOM.partiesList.innerHTML = summaries.map(summary => {
+            const { party, totalBilled, totalPaid, balance } = summary;
+            const balanceClass = balance > 0 ? 'amount-negative' : balance < 0 ? 'amount-positive' : '';
+            
+            return `
+                <div class="list-item">
+                    <div class="list-item-header">
+                        <span class="list-item-title">${escapeHtml(party.name)}</span>
+                        <button class="delete-btn" onclick="deleteParty(${party.id})" title="Delete">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="list-item-details">
+                        ${party.contact_person ? `<span class="detail-tag">👤 ${escapeHtml(party.contact_person)}</span>` : ''}
+                        ${party.phone ? `<span class="detail-tag">📞 ${escapeHtml(party.phone)}</span>` : ''}
+                        ${party.email ? `<span class="detail-tag">✉️ ${escapeHtml(party.email)}</span>` : ''}
+                    </div>
+                    <div class="list-item-footer">
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                                Billed: <span style="color: var(--accent-success);">${formatCurrency(totalBilled)}</span> | 
+                                Paid: <span style="color: var(--accent-primary);">${formatCurrency(totalPaid)}</span>
+                            </div>
+                            <div style="font-size: 1rem; font-weight: 600; font-family: 'JetBrains Mono', monospace;" class="${balanceClass}">
+                                Balance: ${formatCurrency(Math.abs(balance))} ${balance > 0 ? '(Due)' : balance < 0 ? '(Advance)' : ''}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }).catch(err => {
+        console.error('Failed to load party summaries:', err);
+        DOM.partiesList.innerHTML = state.parties.map(party => `
+            <div class="list-item">
+                <div class="list-item-header">
+                    <span class="list-item-title">${escapeHtml(party.name)}</span>
+                    <button class="delete-btn" onclick="deleteParty(${party.id})" title="Delete">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="list-item-details">
+                    ${party.contact_person ? `<span class="detail-tag">👤 ${escapeHtml(party.contact_person)}</span>` : ''}
+                    ${party.phone ? `<span class="detail-tag">📞 ${escapeHtml(party.phone)}</span>` : ''}
+                </div>
+            </div>
+        `).join('');
+    });
+}
+
+function updatePartyDropdown() {
+    const options = '<option value="">Select party...</option>' +
+        state.parties.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+
+    DOM.entryParty.innerHTML = options;
+    DOM.paymentParty.innerHTML = options;
+}
+
+// ===== Payments Functions =====
+async function handleAddPayment(e) {
+    e.preventDefault();
+
+    if (!DOM.paymentDate.value) {
+        DOM.paymentDate.value = new Date().toISOString().split('T')[0];
+    }
+
+    const paymentData = {
+        party_id: DOM.paymentParty.value,
+        amount: parseFloat(DOM.paymentAmount.value),
+        payment_date: DOM.paymentDate.value,
+        payment_method: DOM.paymentMethod.value,
+        reference_number: DOM.paymentReference.value.trim(),
+        notes: DOM.paymentNotes.value.trim()
+    };
+
+    try {
+        const payment = await api('/payments', {
+            method: 'POST',
+            body: JSON.stringify(paymentData)
+        });
+
+        state.payments.unshift(payment);
+        renderParties(); // Refresh to show updated balance
+
+        DOM.paymentForm.reset();
+        DOM.paymentDate.value = new Date().toISOString().split('T')[0];
+    } catch (error) {
+        alert(error.message || 'Failed to record payment');
+    }
+}
+
+async function deletePayment(id) {
+    if (!confirm('Are you sure you want to delete this payment?')) return;
+
+    try {
+        await api(`/payments/${id}`, { method: 'DELETE' });
+        state.payments = state.payments.filter(p => p.id !== id);
+        renderParties(); // Refresh to show updated balance
+    } catch (error) {
+        alert(error.message || 'Failed to delete payment');
+    }
+}
+
 // ===== Render All =====
 function renderAll() {
     renderVehicles();
     renderRates();
     renderEntries();
     renderExpenses();
+    renderParties();
     updateVehicleDropdowns();
     updateProductDropdown();
+    updatePartyDropdown();
     updateHeaderStats();
 }
 
@@ -1104,3 +1358,5 @@ window.deleteVehicle = deleteVehicle;
 window.deleteRate = deleteRate;
 window.deleteEntry = deleteEntry;
 window.deleteExpense = deleteExpense;
+window.deleteParty = deleteParty;
+window.deletePayment = deletePayment;
