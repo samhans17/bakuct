@@ -77,6 +77,7 @@ db.exec(`
         rate_per_minute REAL,
         amount REAL NOT NULL,
         notes TEXT,
+        entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (party_id) REFERENCES parties(id),
         FOREIGN KEY (vehicle_id) REFERENCES vehicles(id)
@@ -91,6 +92,7 @@ db.exec(`
         liters REAL,
         fuel_rate REAL,
         description TEXT,
+        expense_date DATE NOT NULL DEFAULT CURRENT_DATE,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (vehicle_id) REFERENCES vehicles(id)
     );
@@ -130,6 +132,12 @@ try {
 } catch (e) { /* column exists */ }
 try {
     db.exec(`ALTER TABLE entries ADD COLUMN party_id INTEGER`);
+} catch (e) { /* column exists */ }
+try {
+    db.exec(`ALTER TABLE entries ADD COLUMN entry_date DATE DEFAULT CURRENT_DATE`);
+} catch (e) { /* column exists */ }
+try {
+    db.exec(`ALTER TABLE expenses ADD COLUMN expense_date DATE DEFAULT CURRENT_DATE`);
 } catch (e) { /* column exists */ }
 
 // Create default party and link existing entries
@@ -442,16 +450,16 @@ app.get('/api/entries', (req, res) => {
     
     if (party_id) {
         query += ' WHERE e.party_id = ?';
-        const entries = db.prepare(query + ' ORDER BY e.created_at DESC').all(party_id);
+        const entries = db.prepare(query + ' ORDER BY COALESCE(e.entry_date, e.created_at) DESC').all(party_id);
         res.json(entries);
     } else {
-        const entries = db.prepare(query + ' ORDER BY e.created_at DESC').all();
+        const entries = db.prepare(query + ' ORDER BY COALESCE(e.entry_date, e.created_at) DESC').all();
         res.json(entries);
     }
 });
 
 app.post('/api/entries', (req, res) => {
-    const { party_id, vehicle_id, product_name, entry_type, weight_kg, minutes, rate_per_ton, rate_per_minute, notes } = req.body;
+    const { party_id, vehicle_id, product_name, entry_type, weight_kg, minutes, rate_per_ton, rate_per_minute, notes, entry_date } = req.body;
     
     if (!product_name) {
         return res.status(400).json({ error: 'Product name is required' });
@@ -482,8 +490,8 @@ app.post('/api/entries', (req, res) => {
     
     try {
         const stmt = db.prepare(`
-            INSERT INTO entries (party_id, vehicle_id, product_name, entry_type, weight_kg, minutes, rate_per_ton, rate_per_minute, amount, notes) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO entries (party_id, vehicle_id, product_name, entry_type, weight_kg, minutes, rate_per_ton, rate_per_minute, amount, notes, entry_date) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         const result = stmt.run(
             finalPartyId || null,
@@ -495,7 +503,8 @@ app.post('/api/entries', (req, res) => {
             rate_per_ton || null, 
             rate_per_minute || null,
             amount, 
-            notes || null
+            notes || null,
+            entry_date || new Date().toISOString().split('T')[0]
         );
         
         const entry = db.prepare(`
@@ -528,21 +537,21 @@ app.get('/api/expenses', (req, res) => {
         SELECT e.*, v.car_number 
         FROM expenses e 
         LEFT JOIN vehicles v ON e.vehicle_id = v.id 
-        ORDER BY e.created_at DESC
+        ORDER BY COALESCE(e.expense_date, e.created_at) DESC
     `).all();
     res.json(expenses);
 });
 
 app.post('/api/expenses', (req, res) => {
-    const { vehicle_id, expense_type, amount, liters, fuel_rate, description } = req.body;
+    const { vehicle_id, expense_type, amount, liters, fuel_rate, description, expense_date } = req.body;
     
     if (!expense_type || !amount) {
         return res.status(400).json({ error: 'Expense type and amount are required' });
     }
     
     try {
-        const stmt = db.prepare('INSERT INTO expenses (vehicle_id, expense_type, amount, liters, fuel_rate, description) VALUES (?, ?, ?, ?, ?, ?)');
-        const result = stmt.run(vehicle_id || null, expense_type, amount, liters || null, fuel_rate || null, description || null);
+        const stmt = db.prepare('INSERT INTO expenses (vehicle_id, expense_type, amount, liters, fuel_rate, description, expense_date) VALUES (?, ?, ?, ?, ?, ?, ?)');
+        const result = stmt.run(vehicle_id || null, expense_type, amount, liters || null, fuel_rate || null, description || null, expense_date || new Date().toISOString().split('T')[0]);
         
         const expense = db.prepare(`
             SELECT e.*, v.car_number 
@@ -578,14 +587,14 @@ app.get('/api/dashboard', (req, res) => {
     let expensesParams = [];
     
     if (startDate && endDate) {
-        entriesDateFilter = "AND date(e.created_at) BETWEEN date(?) AND date(?)";
-        expensesDateFilter = "AND date(exp.created_at) BETWEEN date(?) AND date(?)";
+        entriesDateFilter = "AND date(COALESCE(e.entry_date, e.created_at)) BETWEEN date(?) AND date(?)";
+        expensesDateFilter = "AND date(COALESCE(exp.expense_date, exp.created_at)) BETWEEN date(?) AND date(?)";
         entriesParams = [startDate, endDate];
         expensesParams = [startDate, endDate];
     } else {
         // Default to current month
-        entriesDateFilter = "AND strftime('%Y-%m', e.created_at) = strftime('%Y-%m', 'now')";
-        expensesDateFilter = "AND strftime('%Y-%m', exp.created_at) = strftime('%Y-%m', 'now')";
+        entriesDateFilter = "AND strftime('%Y-%m', COALESCE(e.entry_date, e.created_at)) = strftime('%Y-%m', 'now')";
+        expensesDateFilter = "AND strftime('%Y-%m', COALESCE(exp.expense_date, exp.created_at)) = strftime('%Y-%m', 'now')";
     }
     
     try {
@@ -623,7 +632,7 @@ app.get('/api/dashboard', (req, res) => {
             LEFT JOIN vehicles v ON e.vehicle_id = v.id 
             LEFT JOIN parties pt ON e.party_id = pt.id
             WHERE 1=1 ${entriesDateFilter}
-            ORDER BY e.created_at DESC 
+            ORDER BY COALESCE(e.entry_date, e.created_at) DESC 
             LIMIT 5
         `).all(...entriesParams);
         
@@ -651,7 +660,7 @@ app.get('/api/dashboard', (req, res) => {
             FROM expenses exp
             LEFT JOIN vehicles v ON exp.vehicle_id = v.id 
             WHERE 1=1 ${expensesDateFilter}
-            ORDER BY exp.created_at DESC 
+            ORDER BY COALESCE(exp.expense_date, exp.created_at) DESC 
             LIMIT 5
         `).all(...expensesParams);
         

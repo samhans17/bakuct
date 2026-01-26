@@ -92,6 +92,7 @@ function initializeDOM() {
     DOM.entryRateMinute = document.getElementById('entryRateMinute');
     DOM.entryAmount = document.getElementById('entryAmount');
     DOM.entryNotes = document.getElementById('entryNotes');
+    DOM.entryDate = document.getElementById('entryDate');
 
     // Expense form fields
     DOM.expenseVehicle = document.getElementById('expenseVehicle');
@@ -101,6 +102,7 @@ function initializeDOM() {
     DOM.fuelRate = document.getElementById('fuelRate');
     DOM.expenseAmount = document.getElementById('expenseAmount');
     DOM.expenseDescription = document.getElementById('expenseDescription');
+    DOM.expenseDate = document.getElementById('expenseDate');
 
     // Vehicle form fields
     DOM.carNumber = document.getElementById('carNumber');
@@ -135,6 +137,16 @@ function initializeDOM() {
     // Set default payment date to today
     if (DOM.paymentDate) {
         DOM.paymentDate.value = new Date().toISOString().split('T')[0];
+    }
+    
+    // Set default entry date to today
+    if (DOM.entryDate) {
+        DOM.entryDate.value = new Date().toISOString().split('T')[0];
+    }
+    
+    // Set default expense date to today
+    if (DOM.expenseDate) {
+        DOM.expenseDate.value = new Date().toISOString().split('T')[0];
     }
 
     // Lists
@@ -663,7 +675,8 @@ async function handleAddEntry(e) {
         vehicle_id: DOM.entryVehicle.value || null,
         product_name: DOM.entryProduct.value,
         entry_type: entryType,
-        notes: DOM.entryNotes.value.trim()
+        notes: DOM.entryNotes.value.trim(),
+        entry_date: DOM.entryDate.value
     };
 
     if (entryType === 'per_minute') {
@@ -698,6 +711,7 @@ async function handleAddEntry(e) {
         DOM.entryRateTon.value = '';
         DOM.entryRateMinute.value = '';
         DOM.entryAmount.value = '';
+        DOM.entryDate.value = new Date().toISOString().split('T')[0];
         updatePartyDropdown();
         handleEntryTypeChange();
     } catch (error) {
@@ -749,7 +763,7 @@ function renderEntries() {
             <div class="list-item">
                 <div class="list-item-header">
                     <span class="list-item-title">${escapeHtml(entry.product_name)}</span>
-                    <span class="list-item-date">${formatDate(entry.created_at)}</span>
+                    <span class="list-item-date">${formatDate(entry.entry_date || entry.created_at)}</span>
                 </div>
                 <div class="list-item-details">
                     ${detailTags.map(t => t.includes('class=') ? t : `<span class="detail-tag">${t}</span>`).join('')}
@@ -872,7 +886,8 @@ async function handleAddExpense(e) {
         amount: parseFloat(DOM.expenseAmount.value),
         liters: parseFloat(DOM.fuelLiters.value) || null,
         fuel_rate: parseFloat(DOM.fuelRate.value) || null,
-        description: DOM.expenseDescription.value.trim()
+        description: DOM.expenseDescription.value.trim(),
+        expense_date: DOM.expenseDate.value
     };
 
     try {
@@ -886,6 +901,7 @@ async function handleAddExpense(e) {
         updateHeaderStats();
 
         DOM.expenseForm.reset();
+        DOM.expenseDate.value = new Date().toISOString().split('T')[0];
         handleExpenseTypeChange();
     } catch (error) {
         alert(error.message || 'Failed to add expense');
@@ -929,7 +945,7 @@ function renderExpenses() {
             <div class="list-item">
                 <div class="list-item-header">
                     <span class="expense-type expense-${expense.expense_type}">${getExpenseTypeLabel(expense.expense_type)}</span>
-                    <span class="list-item-date">${formatDate(expense.created_at)}</span>
+                    <span class="list-item-date">${formatDate(expense.expense_date || expense.created_at)}</span>
                 </div>
                 ${details.length > 0 ? `
                     <div class="list-item-details">
@@ -1147,7 +1163,7 @@ function renderRecentActivity() {
             <div class="activity-item">
                 <div class="activity-info">
                     <span class="activity-title">${escapeHtml(item.product_name)}</span>
-                    <span class="activity-meta">${item.party_name ? item.party_name + ' • ' : ''}${item.car_number ? item.car_number + ' • ' : ''}${formatShortDate(item.created_at)}</span>
+                    <span class="activity-meta">${item.party_name ? item.party_name + ' • ' : ''}${item.car_number ? item.car_number + ' • ' : ''}${formatShortDate(item.entry_date || item.created_at)}</span>
                 </div>
                 <span class="activity-amount income">+${formatCurrency(item.amount)}</span>
             </div>
@@ -1157,7 +1173,7 @@ function renderRecentActivity() {
             <div class="activity-item">
                 <div class="activity-info">
                     <span class="activity-title">${getExpenseTypeLabel(item.expense_type)}</span>
-                    <span class="activity-meta">${item.car_number ? item.car_number + ' • ' : ''}${formatShortDate(item.created_at)}</span>
+                    <span class="activity-meta">${item.car_number ? item.car_number + ' • ' : ''}${formatShortDate(item.expense_date || item.created_at)}</span>
                 </div>
                 <span class="activity-amount expense">-${formatCurrency(item.amount)}</span>
             </div>
