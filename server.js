@@ -459,33 +459,45 @@ app.get('/api/entries', (req, res) => {
 });
 
 app.post('/api/entries', (req, res) => {
-    const { party_id, vehicle_id, product_name, entry_type, weight_kg, minutes, rate_per_ton, rate_per_minute, notes, entry_date } = req.body;
+    const { party_id, vehicle_id, product_name, entry_type, weight_kg, minutes, rate_per_ton, rate_per_minute, amount, notes, entry_date } = req.body;
     
-    if (!product_name) {
-        return res.status(400).json({ error: 'Product name is required' });
-    }
-    
-    // Get default party if not provided
+    let finalProductName = product_name || 'Miscellaneous';
     let finalPartyId = party_id;
-    if (!finalPartyId) {
-        const defaultParty = db.prepare('SELECT * FROM parties WHERE name = ?').get('Cash/General');
-        if (defaultParty) {
-            finalPartyId = defaultParty.id;
-        }
-    }
+    let finalAmount = amount || 0;
     
-    let amount = 0;
-    
-    if (entry_type === 'per_minute') {
-        if (!minutes || !rate_per_minute) {
-            return res.status(400).json({ error: 'Minutes and rate per minute are required' });
+    // Handle miscellaneous entries (direct amount entry)
+    if (entry_type === 'miscellaneous') {
+        if (!amount || amount <= 0) {
+            return res.status(400).json({ error: 'Amount is required for miscellaneous entries' });
         }
-        amount = minutes * rate_per_minute;
+        finalProductName = 'Miscellaneous';
+        // No party required for miscellaneous entries
     } else {
-        if (!weight_kg || !rate_per_ton) {
-            return res.status(400).json({ error: 'Weight and rate per ton are required' });
+        // Regular entries require product name
+        if (!finalProductName) {
+            return res.status(400).json({ error: 'Product name is required' });
         }
-        amount = (weight_kg / 1000) * rate_per_ton;
+        
+        // Get default party if not provided
+        if (!finalPartyId) {
+            const defaultParty = db.prepare('SELECT * FROM parties WHERE name = ?').get('Cash/General');
+            if (defaultParty) {
+                finalPartyId = defaultParty.id;
+            }
+        }
+        
+        // Calculate amount based on entry type
+        if (entry_type === 'per_minute') {
+            if (!minutes || !rate_per_minute) {
+                return res.status(400).json({ error: 'Minutes and rate per minute are required' });
+            }
+            finalAmount = minutes * rate_per_minute;
+        } else {
+            if (!weight_kg || !rate_per_ton) {
+                return res.status(400).json({ error: 'Weight and rate per ton are required' });
+            }
+            finalAmount = (weight_kg / 1000) * rate_per_ton;
+        }
     }
     
     try {
@@ -496,13 +508,13 @@ app.post('/api/entries', (req, res) => {
         const result = stmt.run(
             finalPartyId || null,
             vehicle_id || null, 
-            product_name, 
+            finalProductName, 
             entry_type || 'per_ton',
             weight_kg || null, 
             minutes || null,
             rate_per_ton || null, 
             rate_per_minute || null,
-            amount, 
+            finalAmount, 
             notes || null,
             entry_date || new Date().toISOString().split('T')[0]
         );

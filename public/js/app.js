@@ -86,13 +86,18 @@ function initializeDOM() {
     DOM.entryType = document.getElementById('entryType');
     DOM.perTonFields = document.getElementById('perTonFields');
     DOM.perMinuteFields = document.getElementById('perMinuteFields');
+    DOM.miscellaneousFields = document.getElementById('miscellaneousFields');
     DOM.entryWeight = document.getElementById('entryWeight');
     DOM.entryRateTon = document.getElementById('entryRateTon');
     DOM.entryMinutes = document.getElementById('entryMinutes');
     DOM.entryRateMinute = document.getElementById('entryRateMinute');
     DOM.entryAmount = document.getElementById('entryAmount');
+    DOM.entryAmountDirect = document.getElementById('entryAmountDirect');
     DOM.entryNotes = document.getElementById('entryNotes');
     DOM.entryDate = document.getElementById('entryDate');
+    DOM.entryPartyGroup = document.getElementById('entryPartyGroup');
+    DOM.entryProductGroup = document.getElementById('entryProductGroup');
+    DOM.calculatedAmountGroup = document.getElementById('calculatedAmountGroup');
 
     // Expense form fields
     DOM.expenseVehicle = document.getElementById('expenseVehicle');
@@ -206,6 +211,11 @@ function initializeEventListeners() {
     DOM.entryProduct.addEventListener('change', handleProductChange);
     DOM.entryWeight.addEventListener('input', calculateEntryAmount);
     DOM.entryMinutes.addEventListener('input', calculateEntryAmount);
+    if (DOM.entryAmountDirect) {
+        DOM.entryAmountDirect.addEventListener('input', () => {
+            // Just validate, no calculation needed for miscellaneous entries
+        });
+    }
 
     // Rate form - type selection
     DOM.rateType.addEventListener('change', handleRateTypeChange);
@@ -590,9 +600,30 @@ function handleEntryTypeChange() {
     if (entryType === 'per_minute') {
         DOM.perTonFields.classList.add('hidden');
         DOM.perMinuteFields.classList.remove('hidden');
+        DOM.miscellaneousFields.classList.add('hidden');
+        DOM.entryPartyGroup.classList.remove('hidden');
+        DOM.entryProductGroup.classList.remove('hidden');
+        DOM.calculatedAmountGroup.classList.remove('hidden');
+        DOM.entryParty.required = true;
+        DOM.entryProduct.required = true;
+    } else if (entryType === 'miscellaneous') {
+        DOM.perTonFields.classList.add('hidden');
+        DOM.perMinuteFields.classList.add('hidden');
+        DOM.miscellaneousFields.classList.remove('hidden');
+        DOM.entryPartyGroup.classList.add('hidden');
+        DOM.entryProductGroup.classList.add('hidden');
+        DOM.calculatedAmountGroup.classList.add('hidden');
+        DOM.entryParty.required = false;
+        DOM.entryProduct.required = false;
     } else {
         DOM.perTonFields.classList.remove('hidden');
         DOM.perMinuteFields.classList.add('hidden');
+        DOM.miscellaneousFields.classList.add('hidden');
+        DOM.entryPartyGroup.classList.remove('hidden');
+        DOM.entryProductGroup.classList.remove('hidden');
+        DOM.calculatedAmountGroup.classList.remove('hidden');
+        DOM.entryParty.required = true;
+        DOM.entryProduct.required = true;
     }
     
     calculateEntryAmount();
@@ -658,42 +689,55 @@ function calculateEntryAmount() {
 async function handleAddEntry(e) {
     e.preventDefault();
 
-    const selected = DOM.entryProduct.selectedOptions[0];
-    if (!selected || !selected.value) {
-        alert('Please select a product');
-        return;
-    }
-
-    if (!DOM.entryParty.value) {
-        alert('Please select a party');
-        return;
-    }
-
     const entryType = DOM.entryType.value;
     const entryData = {
-        party_id: DOM.entryParty.value,
         vehicle_id: DOM.entryVehicle.value || null,
-        product_name: DOM.entryProduct.value,
         entry_type: entryType,
         notes: DOM.entryNotes.value.trim(),
         entry_date: DOM.entryDate.value
     };
 
-    if (entryType === 'per_minute') {
-        entryData.minutes = parseFloat(DOM.entryMinutes.value);
-        entryData.rate_per_minute = parseFloat(selected.dataset.rateMinute);
-        
-        if (!entryData.minutes || !entryData.rate_per_minute) {
-            alert('Please enter minutes');
+    if (entryType === 'miscellaneous') {
+        // Simple miscellaneous entry - just amount, vehicle (optional), and date
+        const amount = parseFloat(DOM.entryAmountDirect.value);
+        if (!amount || amount <= 0) {
+            alert('Please enter a valid amount');
             return;
         }
+        entryData.amount = amount;
+        entryData.product_name = 'Miscellaneous';
     } else {
-        entryData.weight_kg = parseFloat(DOM.entryWeight.value);
-        entryData.rate_per_ton = parseFloat(selected.dataset.rateTon);
-        
-        if (!entryData.weight_kg || !entryData.rate_per_ton) {
-            alert('Please enter weight');
+        // Regular entry - requires product and party
+        const selected = DOM.entryProduct.selectedOptions[0];
+        if (!selected || !selected.value) {
+            alert('Please select a product');
             return;
+        }
+
+        if (!DOM.entryParty.value) {
+            alert('Please select a party');
+            return;
+        }
+
+        entryData.party_id = DOM.entryParty.value;
+        entryData.product_name = DOM.entryProduct.value;
+
+        if (entryType === 'per_minute') {
+            entryData.minutes = parseFloat(DOM.entryMinutes.value);
+            entryData.rate_per_minute = parseFloat(selected.dataset.rateMinute);
+            
+            if (!entryData.minutes || !entryData.rate_per_minute) {
+                alert('Please enter minutes');
+                return;
+            }
+        } else {
+            entryData.weight_kg = parseFloat(DOM.entryWeight.value);
+            entryData.rate_per_ton = parseFloat(selected.dataset.rateTon);
+            
+            if (!entryData.weight_kg || !entryData.rate_per_ton) {
+                alert('Please enter weight');
+                return;
+            }
         }
     }
 
@@ -711,6 +755,7 @@ async function handleAddEntry(e) {
         DOM.entryRateTon.value = '';
         DOM.entryRateMinute.value = '';
         DOM.entryAmount.value = '';
+        DOM.entryAmountDirect.value = '';
         DOM.entryDate.value = new Date().toISOString().split('T')[0];
         updatePartyDropdown();
         handleEntryTypeChange();
@@ -745,12 +790,15 @@ function renderEntries() {
 
     DOM.entriesList.innerHTML = state.entries.map(entry => {
         const isPerMinute = entry.entry_type === 'per_minute';
+        const isMiscellaneous = entry.entry_type === 'miscellaneous';
         
         let detailTags = [];
         if (entry.party_name) detailTags.push(`👥 ${escapeHtml(entry.party_name)}`);
         if (entry.car_number) detailTags.push(`🚗 ${escapeHtml(entry.car_number)}`);
         
-        if (isPerMinute) {
+        if (isMiscellaneous) {
+            detailTags.push(`<span class="detail-tag type-misc">💰 Miscellaneous</span>`);
+        } else if (isPerMinute) {
             detailTags.push(`<span class="detail-tag type-minute">⏱️ ${entry.minutes} mins</span>`);
             detailTags.push(`@ ${formatCurrency(entry.rate_per_minute)}/min`);
         } else {
