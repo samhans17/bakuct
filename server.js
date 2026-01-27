@@ -470,8 +470,11 @@ app.post('/api/entries', (req, res) => {
         if (!amount || amount <= 0) {
             return res.status(400).json({ error: 'Amount is required for miscellaneous entries' });
         }
+        if (!party_id) {
+            return res.status(400).json({ error: 'Party is required for miscellaneous entries' });
+        }
         finalProductName = 'Miscellaneous';
-        // No party required for miscellaneous entries
+        finalPartyId = party_id;
     } else {
         // Regular entries require product name
         if (!finalProductName) {

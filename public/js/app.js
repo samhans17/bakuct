@@ -610,10 +610,10 @@ function handleEntryTypeChange() {
         DOM.perTonFields.classList.add('hidden');
         DOM.perMinuteFields.classList.add('hidden');
         DOM.miscellaneousFields.classList.remove('hidden');
-        DOM.entryPartyGroup.classList.add('hidden');
+        DOM.entryPartyGroup.classList.remove('hidden'); // Show party field
         DOM.entryProductGroup.classList.add('hidden');
         DOM.calculatedAmountGroup.classList.add('hidden');
-        DOM.entryParty.required = false;
+        DOM.entryParty.required = true; // Make party required
         DOM.entryProduct.required = false;
     } else {
         DOM.perTonFields.classList.remove('hidden');
@@ -698,12 +698,18 @@ async function handleAddEntry(e) {
     };
 
     if (entryType === 'miscellaneous') {
-        // Simple miscellaneous entry - just amount, vehicle (optional), and date
+        // Simple miscellaneous entry - requires party, amount, vehicle (optional), and date
+        if (!DOM.entryParty.value) {
+            alert('Please select a party');
+            return;
+        }
+        
         const amount = parseFloat(DOM.entryAmountDirect.value);
         if (!amount || amount <= 0) {
             alert('Please enter a valid amount');
             return;
         }
+        entryData.party_id = DOM.entryParty.value;
         entryData.amount = amount;
         entryData.product_name = 'Miscellaneous';
     } else {

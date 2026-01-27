@@ -43,3 +43,4 @@ Add party/client management system to track entries and payments per client whil
 - Migration script is idempotent (safe to run multiple times)
 
 
+
