@@ -1110,3 +1110,47 @@ body::before {
         gap: 8px;
     }
 }
+
+/* ===== Role-based UI (Entry Mode) ===== */
+.role-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    margin-left: 12px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    color: #fff;
+    white-space: nowrap;
+}
+
+.role-badge.hidden {
+    display: none;
+}
+
+.lock-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.95rem;
+    opacity: 0.6;
+    cursor: default;
+}
+
+/* Entry users cannot delete other data (their own entries are handled per-item in JS) */
+.role-entry #expensesList .delete-btn,
+.role-entry #vehiclesList .delete-btn,
+.role-entry #ratesList .delete-btn,
+.role-entry #partiesList .delete-btn {
+    display: none !important;
+}
+
+/* Entry users don't see cumulative / all-time figures or the date selector */
+.role-entry .date-filter-bar,
+.role-entry .alltime-stats,
+.role-entry .vehicle-summary,
+.role-entry .party-summary,
+.role-entry #viewPaymentsBtn {
+    display: none !important;
+}

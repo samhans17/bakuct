@@ -26,6 +26,7 @@ db.exec(`
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
+        role TEXT DEFAULT 'admin',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -78,6 +79,7 @@ db.exec(`
         amount REAL NOT NULL,
         notes TEXT,
         entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        created_by TEXT DEFAULT 'admin',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (party_id) REFERENCES parties(id),
         FOREIGN KEY (vehicle_id) REFERENCES vehicles(id)
@@ -140,6 +142,25 @@ try {
     db.exec(`ALTER TABLE expenses ADD COLUMN expense_date DATE DEFAULT CURRENT_DATE`);
 } catch (e) { /* column exists */ }
 
+// Add role column to users (migration for existing databases)
+try {
+    db.exec(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'admin'`);
+} catch (e) { /* column exists */ }
+
+// Track who created each entry (migration for existing databases)
+try {
+    db.exec(`ALTER TABLE entries ADD COLUMN created_by TEXT DEFAULT 'admin'`);
+} catch (e) { /* column exists */ }
+
+// Ensure existing users have a role, and create the day-entry user
+try {
+    db.prepare("UPDATE users SET role = 'admin' WHERE role IS NULL OR role = ''").run();
+    db.prepare("INSERT OR IGNORE INTO users (username, password, role) VALUES ('entry', ?, 'entry')")
+        .run('entry2024');
+} catch (e) {
+    console.error('User role migration error:', e.message);
+}
+
 // Create default party and link existing entries
 try {
     let defaultParty = db.prepare('SELECT * FROM parties WHERE name = ?').get('Cash/General');
@@ -159,14 +180,43 @@ try {
     console.error('Migration error:', e.message);
 }
 
+// Start of the current "open" week for the entry role.
+// Entries lock every Friday (end of day). An entry is editable by the entry user only
+// while its date is on/after the Saturday that begins the current open week; once a Friday
+// passes, that week's entries are locked permanently. Returns a YYYY-MM-DD string (UTC).
+function getOpenWeekStart() {
+    const now = new Date();
+    const dow = now.getUTCDay();          // 0=Sun .. 5=Fri .. 6=Sat
+    const daysBack = (dow + 1) % 7;       // days since the Saturday that opened this week
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysBack));
+    return start.toISOString().split('T')[0];
+}
+
+// ============ ROLE GATE ============
+// Lightweight role enforcement based on the X-User-Role header sent by the client.
+// The 'entry' role may create records, but may only delete its OWN, unlocked entries.
+app.use('/api', (req, res, next) => {
+    req.userRole = req.headers['x-user-role'] || 'admin';
+
+    if (req.userRole === 'entry' && req.method === 'DELETE') {
+        // The only deletions an entry user may attempt are on entries (ownership + lock
+        // are verified in the entries DELETE handler). Everything else is forbidden.
+        const isEntryDelete = /^\/api\/entries\/\d+/.test(req.originalUrl.split('?')[0]);
+        if (!isEntryDelete) {
+            return res.status(403).json({ error: 'Entry users may only delete their own entries.' });
+        }
+    }
+    next();
+});
+
 // ============ AUTH ROUTES ============
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
-    
+
     const user = db.prepare('SELECT * FROM users WHERE username = ? AND password = ?').get(username, password);
-    
+
     if (user) {
-        res.json({ success: true, message: 'Login successful' });
+        res.json({ success: true, message: 'Login successful', role: user.role || 'admin' });
     } else {
         res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
@@ -440,22 +490,35 @@ app.delete('/api/payments/:id', (req, res) => {
 // ============ ENTRIES ROUTES ============
 app.get('/api/entries', (req, res) => {
     const { party_id } = req.query;
-    
+
     let query = `
-        SELECT e.*, v.car_number, pt.name as party_name 
-        FROM entries e 
-        LEFT JOIN vehicles v ON e.vehicle_id = v.id 
+        SELECT e.*, v.car_number, pt.name as party_name
+        FROM entries e
+        LEFT JOIN vehicles v ON e.vehicle_id = v.id
         LEFT JOIN parties pt ON e.party_id = pt.id
     `;
-    
+
+    const conditions = [];
+    const params = [];
+
     if (party_id) {
-        query += ' WHERE e.party_id = ?';
-        const entries = db.prepare(query + ' ORDER BY COALESCE(e.entry_date, e.created_at) DESC').all(party_id);
-        res.json(entries);
-    } else {
-        const entries = db.prepare(query + ' ORDER BY COALESCE(e.entry_date, e.created_at) DESC').all();
-        res.json(entries);
+        conditions.push('e.party_id = ?');
+        params.push(party_id);
     }
+
+    // Entry users see the current open week (since the last Friday lock), so they can
+    // manage their own entries before that week locks.
+    if (req.userRole === 'entry') {
+        conditions.push("date(COALESCE(e.entry_date, e.created_at)) >= date(?)");
+        params.push(getOpenWeekStart());
+    }
+
+    if (conditions.length) {
+        query += ' WHERE ' + conditions.join(' AND ');
+    }
+
+    const entries = db.prepare(query + ' ORDER BY COALESCE(e.entry_date, e.created_at) DESC').all(...params);
+    res.json(entries);
 });
 
 app.post('/api/entries', (req, res) => {
@@ -505,21 +568,22 @@ app.post('/api/entries', (req, res) => {
     
     try {
         const stmt = db.prepare(`
-            INSERT INTO entries (party_id, vehicle_id, product_name, entry_type, weight_kg, minutes, rate_per_ton, rate_per_minute, amount, notes, entry_date) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO entries (party_id, vehicle_id, product_name, entry_type, weight_kg, minutes, rate_per_ton, rate_per_minute, amount, notes, entry_date, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         const result = stmt.run(
             finalPartyId || null,
-            vehicle_id || null, 
-            finalProductName, 
+            vehicle_id || null,
+            finalProductName,
             entry_type || 'per_ton',
-            weight_kg || null, 
+            weight_kg || null,
             minutes || null,
-            rate_per_ton || null, 
+            rate_per_ton || null,
             rate_per_minute || null,
-            finalAmount, 
+            finalAmount,
             notes || null,
-            entry_date || new Date().toISOString().split('T')[0]
+            entry_date || new Date().toISOString().split('T')[0],
+            req.userRole === 'entry' ? 'entry' : 'admin'
         );
         
         const entry = db.prepare(`
@@ -537,7 +601,24 @@ app.post('/api/entries', (req, res) => {
 
 app.delete('/api/entries/:id', (req, res) => {
     const { id } = req.params;
-    
+
+    // Entry users may only delete their own entries, and only while unlocked (admin bypasses both).
+    if (req.userRole === 'entry') {
+        const entry = db.prepare('SELECT id, entry_date, created_at, created_by FROM entries WHERE id = ?').get(id);
+
+        if (!entry) {
+            return res.status(404).json({ error: 'Entry not found.' });
+        }
+        if (entry.created_by !== 'entry') {
+            return res.status(403).json({ error: 'You can only delete entries you created.' });
+        }
+
+        const entryDate = (entry.entry_date || entry.created_at || '').slice(0, 10);
+        if (entryDate < getOpenWeekStart()) {
+            return res.status(403).json({ error: 'This entry is locked (past the weekly Friday cut-off) and can no longer be deleted.' });
+        }
+    }
+
     try {
         db.prepare('DELETE FROM entries WHERE id = ?').run(id);
         res.json({ success: true });
@@ -548,10 +629,16 @@ app.delete('/api/entries/:id', (req, res) => {
 
 // ============ EXPENSES ROUTES ============
 app.get('/api/expenses', (req, res) => {
+    // Entry users only ever see the current day's records
+    const dayFilter = req.userRole === 'entry'
+        ? "WHERE date(COALESCE(e.expense_date, e.created_at)) = date('now')"
+        : '';
+
     const expenses = db.prepare(`
-        SELECT e.*, v.car_number 
-        FROM expenses e 
-        LEFT JOIN vehicles v ON e.vehicle_id = v.id 
+        SELECT e.*, v.car_number
+        FROM expenses e
+        LEFT JOIN vehicles v ON e.vehicle_id = v.id
+        ${dayFilter}
         ORDER BY COALESCE(e.expense_date, e.created_at) DESC
     `).all();
     res.json(expenses);
@@ -593,14 +680,23 @@ app.delete('/api/expenses/:id', (req, res) => {
 
 // ============ DASHBOARD ROUTES ============
 app.get('/api/dashboard', (req, res) => {
-    const { startDate, endDate } = req.query;
-    
+    const isEntryUser = req.userRole === 'entry';
+
+    // Entry users are locked to the current day, regardless of what they request
+    let startDate = req.query.startDate;
+    let endDate = req.query.endDate;
+    if (isEntryUser) {
+        const today = new Date().toISOString().split('T')[0];
+        startDate = today;
+        endDate = today;
+    }
+
     // Build date filters for different tables
     let entriesDateFilter = '';
     let expensesDateFilter = '';
     let entriesParams = [];
     let expensesParams = [];
-    
+
     if (startDate && endDate) {
         entriesDateFilter = "AND date(COALESCE(e.entry_date, e.created_at)) BETWEEN date(?) AND date(?)";
         expensesDateFilter = "AND date(COALESCE(exp.expense_date, exp.created_at)) BETWEEN date(?) AND date(?)";
@@ -711,14 +807,16 @@ app.get('/api/dashboard', (req, res) => {
                 filteredProfit: filteredIncome - filteredExpenses,
                 totalVehicles,
                 filteredEntriesCount,
-                allTimeIncome,
-                allTimeExpenses,
-                allTimeProfit: allTimeIncome - allTimeExpenses
+                // Entry users never see cumulative/all-time figures
+                allTimeIncome: isEntryUser ? null : allTimeIncome,
+                allTimeExpenses: isEntryUser ? null : allTimeExpenses,
+                allTimeProfit: isEntryUser ? null : allTimeIncome - allTimeExpenses
             },
             expensesByType,
             incomeByProduct,
-            vehicleSummary,
-            partySummary,
+            // Vehicle and party summaries include cumulative totals — hide from entry users
+            vehicleSummary: isEntryUser ? [] : vehicleSummary,
+            partySummary: isEntryUser ? [] : partySummary,
             recentEntries,
             recentExpenses,
             dateRange: {

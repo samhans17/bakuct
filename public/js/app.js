@@ -21,7 +21,8 @@ let state = {
         startDate: null,
         endDate: null
     },
-    theme: 'dark'
+    theme: 'dark',
+    role: 'admin'
 };
 
 // ===== DOM Elements =====
@@ -53,6 +54,7 @@ function initializeDOM() {
     DOM.appContainer = document.getElementById('appContainer');
     DOM.logoutBtn = document.getElementById('logoutBtn');
     DOM.themeToggle = document.getElementById('themeToggle');
+    DOM.roleBadge = document.getElementById('roleBadge');
 
     // Header stats
     DOM.headerIncome = document.getElementById('headerIncome');
@@ -249,6 +251,7 @@ async function api(endpoint, options = {}) {
         const response = await fetch(`${API_BASE}${endpoint}`, {
             headers: {
                 'Content-Type': 'application/json',
+                'X-User-Role': state.role,
                 ...options.headers
             },
             ...options
@@ -271,6 +274,7 @@ async function api(endpoint, options = {}) {
 function checkAuth() {
     const isLoggedIn = sessionStorage.getItem('bakuctLoggedIn');
     if (isLoggedIn === 'true') {
+        state.role = sessionStorage.getItem('bakuctRole') || 'admin';
         showApp();
     }
 }
@@ -281,12 +285,14 @@ async function handleLogin(e) {
     const password = DOM.passwordInput.value;
 
     try {
-        await api('/login', {
+        const result = await api('/login', {
             method: 'POST',
             body: JSON.stringify({ username, password })
         });
 
+        state.role = result.role || 'admin';
         sessionStorage.setItem('bakuctLoggedIn', 'true');
+        sessionStorage.setItem('bakuctRole', state.role);
         DOM.loginError.classList.add('hidden');
         showApp();
     } catch (error) {
@@ -296,6 +302,8 @@ async function handleLogin(e) {
 
 function logout() {
     sessionStorage.removeItem('bakuctLoggedIn');
+    sessionStorage.removeItem('bakuctRole');
+    state.role = 'admin';
     DOM.loginScreen.classList.remove('hidden');
     DOM.appContainer.classList.add('hidden');
     DOM.usernameInput.value = '';
@@ -305,7 +313,29 @@ function logout() {
 async function showApp() {
     DOM.loginScreen.classList.add('hidden');
     DOM.appContainer.classList.remove('hidden');
+    applyRolePermissions();
     await loadAllData();
+}
+
+// Adjust the UI for the current role. The 'entry' role is a day-only, add-only user.
+function applyRolePermissions() {
+    const isEntry = state.role === 'entry';
+
+    // Toggling this class drives all role-based CSS (hidden delete buttons, hidden panels, etc.)
+    document.body.classList.toggle('role-entry', isEntry);
+
+    // Show a mode badge in the header
+    if (DOM.roleBadge) {
+        DOM.roleBadge.textContent = isEntry ? 'Entry Mode — Today Only' : 'Admin';
+        DOM.roleBadge.classList.toggle('hidden', false);
+    }
+
+    if (isEntry) {
+        // Entry users are locked to the current day
+        state.dateFilter.preset = 'today';
+        state.dateFilter.startDate = null;
+        state.dateFilter.endDate = null;
+    }
 }
 
 // ===== Data Loading =====
@@ -365,6 +395,10 @@ function getDateRange() {
     let startDate, endDate;
 
     switch (preset) {
+        case 'today': {
+            const t = today.toISOString().split('T')[0];
+            return { startDate: t, endDate: t };
+        }
         case 'current_month':
             startDate = new Date(today.getFullYear(), today.getMonth(), 1);
             endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
@@ -408,6 +442,7 @@ function getDateRange() {
 function getDateRangeLabel() {
     const preset = state.dateFilter.preset;
     const labels = {
+        'today': 'Today',
         'current_month': 'Current Month',
         'last_month': 'Last Month',
         'last_7_days': 'Last 7 Days',
@@ -444,6 +479,17 @@ function formatCurrency(amount) {
         minimumFractionDigits: 0,
         maximumFractionDigits: 2
     });
+}
+
+// Start (YYYY-MM-DD, UTC) of the current open week for the entry role.
+// Entries dated before this are locked (a Friday cut-off has passed). Must match the
+// server's getOpenWeekStart().
+function getOpenWeekStart() {
+    const now = new Date();
+    const dow = now.getUTCDay();          // 0=Sun .. 5=Fri .. 6=Sat
+    const daysBack = (dow + 1) % 7;       // days since the Saturday that opened this week
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysBack));
+    return start.toISOString().split('T')[0];
 }
 
 function formatDate(dateString) {
@@ -794,10 +840,25 @@ function renderEntries() {
         return;
     }
 
+    const openWeekStart = getOpenWeekStart();
+
     DOM.entriesList.innerHTML = state.entries.map(entry => {
         const isPerMinute = entry.entry_type === 'per_minute';
         const isMiscellaneous = entry.entry_type === 'miscellaneous';
-        
+
+        // Admin can delete anything; entry users only their own, unlocked entries
+        const entryDate = (entry.entry_date || entry.created_at || '').slice(0, 10);
+        const canDelete = state.role === 'entry'
+            ? (entry.created_by === 'entry' && entryDate >= openWeekStart)
+            : true;
+        const entryActions = canDelete
+            ? `<button class="delete-btn" onclick="deleteEntry(${entry.id})" title="Delete">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                </button>`
+            : (state.role === 'entry' ? `<span class="lock-badge" title="Locked or not created by you">🔒</span>` : '');
+
         let detailTags = [];
         if (entry.party_name) detailTags.push(`👥 ${escapeHtml(entry.party_name)}`);
         if (entry.car_number) detailTags.push(`🚗 ${escapeHtml(entry.car_number)}`);
@@ -825,11 +886,7 @@ function renderEntries() {
                 ${entry.notes ? `<div class="list-item-details"><span class="detail-tag">📝 ${escapeHtml(entry.notes)}</span></div>` : ''}
                 <div class="list-item-footer">
                     <span class="list-item-amount amount-positive">+${formatCurrency(entry.amount)}</span>
-                    <button class="delete-btn" onclick="deleteEntry(${entry.id})" title="Delete">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                        </svg>
-                    </button>
+                    ${entryActions}
                 </div>
             </div>
         `;
@@ -1237,8 +1294,18 @@ function renderRecentActivity() {
 
 // ===== Header Stats =====
 function updateHeaderStats() {
-    const totalIncome = state.entries.reduce((sum, e) => sum + e.amount, 0);
-    const totalExpense = state.expenses.reduce((sum, e) => sum + e.amount, 0);
+    let entries = state.entries;
+    let expenses = state.expenses;
+
+    // Entry users' header reflects today's totals only (their lists span the whole open week)
+    if (state.role === 'entry') {
+        const today = new Date().toISOString().split('T')[0];
+        entries = entries.filter(e => (e.entry_date || e.created_at || '').slice(0, 10) === today);
+        expenses = expenses.filter(e => (e.expense_date || e.created_at || '').slice(0, 10) === today);
+    }
+
+    const totalIncome = entries.reduce((sum, e) => sum + e.amount, 0);
+    const totalExpense = expenses.reduce((sum, e) => sum + e.amount, 0);
     const profit = totalIncome - totalExpense;
 
     DOM.headerIncome.textContent = `Income: ${formatCurrency(totalIncome)}`;
@@ -1299,8 +1366,25 @@ function renderParties() {
         return;
     }
 
+    // Entry users don't see cumulative account balances — show plain party info only
+    if (state.role === 'entry') {
+        DOM.partiesList.innerHTML = state.parties.map(party => `
+            <div class="list-item">
+                <div class="list-item-header">
+                    <span class="list-item-title">${escapeHtml(party.name)}</span>
+                </div>
+                <div class="list-item-details">
+                    ${party.contact_person ? `<span class="detail-tag">👤 ${escapeHtml(party.contact_person)}</span>` : ''}
+                    ${party.phone ? `<span class="detail-tag">📞 ${escapeHtml(party.phone)}</span>` : ''}
+                    ${party.email ? `<span class="detail-tag">✉️ ${escapeHtml(party.email)}</span>` : ''}
+                </div>
+            </div>
+        `).join('');
+        return;
+    }
+
     // Load party summaries
-    Promise.all(state.parties.map(party => 
+    Promise.all(state.parties.map(party =>
         api(`/parties/${party.id}/summary`)
     )).then(summaries => {
         DOM.partiesList.innerHTML = summaries.map(summary => {
